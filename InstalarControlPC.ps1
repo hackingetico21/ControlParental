@@ -11,10 +11,13 @@ if ($Desinstalar) {
     Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
     schtasks /delete /tn "PCWeb_$userName" /f 2>$null
+    schtasks /delete /tn "PCWeb_${userName}_minuto" /f 2>$null
     
     netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
     
     netsh http delete urlacl url=http://*:$Puerto/ 2>$null
+    netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
+    netsh http delete urlacl url=http://$computerName:$Puerto/ 2>$null
     
     Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
     
@@ -42,12 +45,12 @@ Write-Host "1. Creando script del servidor..." -ForegroundColor Yellow
 
 $webServerScript = @'
 param(
-    [int]$Port = 8080,
-    [switch]$ModoPrueba
+    [int]$Port = 8080
 )
 
 $logPath = "C:\Windows\System32\WebServer.log"
 $pidFile = "C:\Windows\System32\WebServer.pid"
+$computerName = $env:COMPUTERNAME
 
 function Write-Log {
     param($Message)
@@ -56,23 +59,20 @@ function Write-Log {
 }
 
 function Start-WebServer {
+    $pid | Out-File $pidFile -Force
+    
     Write-Log "======================================"
     Write-Log "INICIANDO SERVIDOR WEB EN PUERTO $Port"
     Write-Log "Usuario: $env:USERNAME"
-    Write-Log "Computadora: $env:COMPUTERNAME"
+    Write-Log "Computadora: $computerName"
     Write-Log "PID: $pid"
     
     try {
-        # Guardar PID
-        $pid | Out-File $pidFile -Force
-        
-        # Crear y configurar HttpListener
         $listener = New-Object System.Net.HttpListener
         
-        # Intentar con diferentes prefijos para asegurar conectividad
         $listener.Prefixes.Add("http://*:$Port/")
         $listener.Prefixes.Add("http://localhost:$Port/")
-        $listener.Prefixes.Add("http://$env:COMPUTERNAME:$Port/")
+        $listener.Prefixes.Add("http://$computerName:$Port/")
         
         $listener.Start()
         
@@ -86,8 +86,6 @@ function Start-WebServer {
             $context = $listener.GetContext()
             $request = $context.Request
             $response = $context.Response
-            
-            Write-Log "Peticion: $($request.HttpMethod) $($request.Url.LocalPath) desde $($request.RemoteEndPoint)"
             
             if ($request.Url.LocalPath -eq '/' -or $request.Url.LocalPath -eq '') {
                 $html = @"
@@ -243,13 +241,11 @@ setInterval(actualizarInfo, 1000);
         Write-Log "Detalles: $($_.Exception.Message)"
         Write-Log "Stack: $($_.ScriptStackTrace)"
         
-        # Esperar y reintentar
         Start-Sleep -Seconds 30
         Start-WebServer
     }
 }
 
-# Iniciar el servidor
 Start-WebServer
 '@
 
@@ -275,21 +271,22 @@ netsh http add urlacl url=http://$computerName:$Puerto/ user=BUILTIN\Users 2>$nu
 Write-Host "  OK - URLs reservadas" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Creando tarea programada CON LOS MISMOS PRIVILEGIOS..." -ForegroundColor Yellow
+Write-Host "4. Creando tareas programadas..." -ForegroundColor Yellow
 
 schtasks /delete /tn "PCWeb_$userName" /f 2>$null
+schtasks /delete /tn "PCWeb_${userName}_minuto" /f 2>$null
 
-# Crear tarea con los mismos privilegios que el instalador
+$taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
+
 schtasks /create /tn "PCWeb_$userName" `
-    /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" `
+    /tr "$taskCommand" `
     /sc onstart `
     /ru SYSTEM `
     /rl HIGHEST `
     /f 2>$null
 
-# Agregar un disparador adicional cada minuto para asegurar que siempre esté corriendo
 schtasks /create /tn "PCWeb_${userName}_minuto" `
-    /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" `
+    /tr "$taskCommand" `
     /sc minute `
     /mo 1 `
     /ru SYSTEM `
@@ -306,13 +303,11 @@ Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer
 Start-Sleep -Seconds 2
 
 Write-Host ""
-Write-Host "6. Iniciando servidor (MISMO METODO QUE USARA LA TAREA)..." -ForegroundColor Yellow
+Write-Host "6. Iniciando servidor..." -ForegroundColor Yellow
 
-# Iniciar el servidor con los mismos argumentos que usará la tarea
-$arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden
+Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
 
-Write-Host "  OK - Servidor iniciado con PID: $pid" -ForegroundColor Green
+Write-Host "  OK - Servidor iniciado" -ForegroundColor Green
 Start-Sleep -Seconds 5
 
 Write-Host ""
