@@ -10,13 +10,14 @@ $computerName = $env:COMPUTERNAME
 if ($Desinstalar) {
     Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
-    schtasks /delete /tn "PCWeb_$userName" /f 2>$null
-    schtasks /delete /tn "PCWeb_${userName}_minuto" /f 2>$null
+    schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
+    schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
     
-    netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
+    netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
     
     netsh http delete urlacl url=http://*:$Puerto/ 2>$null
     netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
+    netsh http delete urlacl url=http://$computerName:$Puerto/ 2>$null
     
     Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
     
@@ -65,12 +66,14 @@ function Start-WebServer {
     Write-Log "Usuario: $env:USERNAME"
     Write-Log "Computadora: $computerName"
     Write-Log "PID: $pid"
+    Write-Log "Nivel: SYSTEM"
     
     try {
         $listener = New-Object System.Net.HttpListener
         
         $listener.Prefixes.Add("http://*:$Port/")
         $listener.Prefixes.Add("http://localhost:$Port/")
+        $listener.Prefixes.Add("http://$computerName:$Port/")
         
         $listener.Start()
         
@@ -253,35 +256,37 @@ Write-Host "  OK - Script creado: C:\Windows\System32\WebServer.ps1" -Foreground
 
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
-netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
-netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
+netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
+netsh advfirewall firewall add rule name="PCWeb_SYSTEM" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "3. Reservando URL en el sistema..." -ForegroundColor Yellow
 netsh http delete urlacl url=http://*:$Puerto/ 2>$null
 netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
+netsh http delete urlacl url=http://$computerName:$Puerto/ 2>$null
 
 netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
 netsh http add urlacl url=http://localhost:$Puerto/ user=BUILTIN\Users 2>$null
+netsh http add urlacl url=http://$computerName:$Puerto/ user=BUILTIN\Users 2>$null
 Write-Host "  OK - URLs reservadas" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Creando tareas programadas..." -ForegroundColor Yellow
+Write-Host "4. Creando tareas programadas como SYSTEM (ADMIN)..." -ForegroundColor Yellow
 
-schtasks /delete /tn "PCWeb_$userName" /f 2>$null
-schtasks /delete /tn "PCWeb_${userName}_minuto" /f 2>$null
+schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
+schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
 
 $taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
 
-schtasks /create /tn "PCWeb_$userName" `
+schtasks /create /tn "PCWeb_SYSTEM" `
     /tr "$taskCommand" `
     /sc onstart `
     /ru SYSTEM `
     /rl HIGHEST `
     /f 2>$null
 
-schtasks /create /tn "PCWeb_${userName}_minuto" `
+schtasks /create /tn "PCWeb_SYSTEM_Minuto" `
     /tr "$taskCommand" `
     /sc minute `
     /mo 1 `
@@ -290,8 +295,8 @@ schtasks /create /tn "PCWeb_${userName}_minuto" `
     /f 2>$null
 
 Write-Host "  OK - Tareas creadas como SYSTEM:" -ForegroundColor Green
-Write-Host "    - PCWeb_$userName (al iniciar Windows)" -ForegroundColor White
-Write-Host "    - PCWeb_${userName}_minuto (cada 1 minuto)" -ForegroundColor White
+Write-Host "    - PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
+Write-Host "    - PCWeb_SYSTEM_Minuto (cada 1 minuto)" -ForegroundColor White
 
 Write-Host ""
 Write-Host "5. Matando procesos anteriores..." -ForegroundColor Yellow
@@ -299,11 +304,12 @@ Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer
 Start-Sleep -Seconds 2
 
 Write-Host ""
-Write-Host "6. Iniciando servidor..." -ForegroundColor Yellow
+Write-Host "6. Iniciando servidor como ADMIN (SYSTEM)..." -ForegroundColor Yellow
 
-Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
+$arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
+Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -Verb RunAs
 
-Write-Host "  OK - Servidor iniciado" -ForegroundColor Green
+Write-Host "  OK - Servidor iniciado como ADMIN" -ForegroundColor Green
 Start-Sleep -Seconds 5
 
 Write-Host ""
@@ -348,15 +354,16 @@ Write-Host ""
 Write-Host "URL DE ACCESO:" -ForegroundColor Yellow
 Write-Host "  Local:    http://localhost:$Puerto" -ForegroundColor White
 Write-Host "  Red:      http://$($ip):$Puerto" -ForegroundColor White
+Write-Host "  Nombre:   http://$computerName:$Puerto" -ForegroundColor White
 Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
 Write-Host "  Script:   C:\Windows\System32\WebServer.ps1" -ForegroundColor White
 Write-Host "  Log:      C:\Windows\System32\WebServer.log" -ForegroundColor White
 Write-Host "  PID:      C:\Windows\System32\WebServer.pid" -ForegroundColor White
 Write-Host ""
-Write-Host "TAREAS PROGRAMADAS (ejecutadas como SYSTEM):" -ForegroundColor Yellow
-Write-Host "  - PCWeb_$userName (al iniciar Windows)" -ForegroundColor White
-Write-Host "  - PCWeb_${userName}_minuto (cada 1 minuto)" -ForegroundColor White
+Write-Host "TAREAS PROGRAMADAS (ejecutadas como SYSTEM/ADMIN):" -ForegroundColor Yellow
+Write-Host "  - PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
+Write-Host "  - PCWeb_SYSTEM_Minuto (cada 1 minuto)" -ForegroundColor White
 Write-Host ""
 Write-Host "COMANDOS UTILES:" -ForegroundColor Yellow
 Write-Host "  Ver log:     Get-Content C:\Windows\System32\WebServer.log -Wait" -ForegroundColor White
