@@ -10,18 +10,14 @@ $computerName = $env:COMPUTERNAME
 if ($Desinstalar) {
     Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
-    # Eliminar tareas programadas
     schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
     schtasks /delete /tn "PCWeb_Monitor_$userName`_backup" /f 2>$null
     
-    # Eliminar regla del firewall
     netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
     
-    # Eliminar scripts
     Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
     Remove-Item "C:\Windows\System32\WebMonitor.ps1" -ErrorAction SilentlyContinue
     
-    # Matar procesos
     Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     
@@ -29,7 +25,6 @@ if ($Desinstalar) {
     exit
 }
 
-# Verificar permisos de administrador
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Host "Solicitando permisos de administrador..." -ForegroundColor Yellow
     Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Puerto $Puerto" -Verb RunAs
@@ -46,26 +41,24 @@ Write-Host ""
 
 Write-Host "1. Creando scripts..." -ForegroundColor Yellow
 
-# Script del servidor web
-$webScript = @'
-param($Port = 8080)
+$webScript = @"
+param(`$Port = $Puerto)
 
-$logPath = "$env:TEMP\webserver_log.txt"
-$runningFile = "$env:TEMP\webserver_running.txt"
+`$logPath = "`$env:TEMP\webserver_log.txt"
+`$runningFile = "`$env:TEMP\webserver_running.txt"
 
-# Función para escribir log
 function Write-Log {
-    param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File $logPath -Append
+    param(`$Message)
+    `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "`$timestamp - `$Message" | Out-File `$logPath -Append
 }
 
 Write-Log "=== SERVIDOR WEB INICIADO ==="
-Write-Log "Puerto: $Port"
-Write-Log "Usuario: $env:USERNAME"
-Write-Log "Computadora: $env:COMPUTERNAME"
+Write-Log "Puerto: `$Port"
+Write-Log "Usuario: `$env:USERNAME"
+Write-Log "Computadora: `$env:COMPUTERNAME"
 
-$simpleHTML = @"
+`$simpleHTML = @"
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -175,7 +168,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
 </div>
 </div>
 <div class="footer">
-<span class="system-info">ACCESS: AUTHORIZED | PORT: <span id="portNumber">$Port</span> | PROTOCOL: HTTP/1.1</span>
+<span class="system-info">ACCESS: AUTHORIZED | PORT: <span id="portNumber">`$Port</span> | PROTOCOL: HTTP/1.1</span>
 </div>
 </div>
 <script>
@@ -241,189 +234,173 @@ document.getElementById('pcTime').textContent=timeStr;
 </html>
 "@
 
-# Iniciar servidor web
 try {
-    # Eliminar el running file anterior
-    Remove-Item $runningFile -ErrorAction SilentlyContinue
+    Remove-Item `$runningFile -ErrorAction SilentlyContinue
     
-    $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add("http://localhost:$Port/")
-    $listener.Start()
+    `$listener = New-Object System.Net.HttpListener
+    `$listener.Prefixes.Add("http://*:$Port/")
+    `$listener.Start()
     
-    Write-Log "Servidor escuchando en http://localhost:$Port/"
-    "RUNNING" | Out-File $runningFile -Force
+    Write-Log "Servidor escuchando en http://*:$Port/"
+    "RUNNING" | Out-File `$runningFile -Force
     
-    while ($true) {
-        $context = $listener.GetContext()
-        $request = $context.Request
-        $response = $context.Response
+    while (`$true) {
+        `$context = `$listener.GetContext()
+        `$request = `$context.Request
+        `$response = `$context.Response
         
-        if ($request.Url.LocalPath -eq '/' -or $request.Url.LocalPath -eq '') {
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($simpleHTML)
-            $response.ContentType = 'text/html; charset=utf-8'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            Write-Log "Página servida a $($request.RemoteEndPoint)"
+        if (`$request.Url.LocalPath -eq '/' -or `$request.Url.LocalPath -eq '') {
+            `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$simpleHTML)
+            `$response.ContentType = 'text/html; charset=utf-8'
+            `$response.ContentLength64 = `$buffer.Length
+            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
+            Write-Log "Página servida a $(`$request.RemoteEndPoint)"
         }
-        elseif ($request.Url.LocalPath -eq '/info') {
-            $info = @{
-                nombre = $env:COMPUTERNAME
-                usuario = $env:USERNAME
+        elseif (`$request.Url.LocalPath -eq '/info') {
+            `$info = @{
+                nombre = `$env:COMPUTERNAME
+                usuario = `$env:USERNAME
                 hora = (Get-Date).ToString('HH:mm')
             }
-            $json = $info | ConvertTo-Json
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json; charset=utf-8'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            `$json = `$info | ConvertTo-Json
+            `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$json)
+            `$response.ContentType = 'application/json; charset=utf-8'
+            `$response.ContentLength64 = `$buffer.Length
+            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
         }
-        elseif ($request.Url.LocalPath -eq '/cmd' -and $request.HttpMethod -eq 'POST') {
-            $reader = New-Object System.IO.StreamReader($request.InputStream, $request.ContentEncoding)
-            $body = $reader.ReadToEnd()
-            $data = $body | ConvertFrom-Json
+        elseif (`$request.Url.LocalPath -eq '/cmd' -and `$request.HttpMethod -eq 'POST') {
+            `$reader = New-Object System.IO.StreamReader(`$request.InputStream, `$request.ContentEncoding)
+            `$body = `$reader.ReadToEnd()
+            `$data = `$body | ConvertFrom-Json
             
-            $result = @{estado = 'ok'; mensaje = ''}
+            `$result = @{estado = 'ok'; mensaje = ''}
             
             Write-Log "Comando recibido: $($data.accion) desde $($request.RemoteEndPoint)"
             
-            switch ($data.accion) {
+            switch (`$data.accion) {
                 'apagar' {
                     shutdown /s /f /t 0
-                    $result.mensaje = 'SHUTDOWN SEQUENCE INITIATED'
+                    `$result.mensaje = 'SHUTDOWN SEQUENCE INITIATED'
                 }
                 'reiniciar' {
                     shutdown /r /f /t 0
-                    $result.mensaje = 'REBOOT SEQUENCE INITIATED'
+                    `$result.mensaje = 'REBOOT SEQUENCE INITIATED'
                 }
                 'bloquear' {
                     rundll32.exe user32.dll,LockWorkStation
-                    $result.mensaje = 'SYSTEM LOCK ENGAGED'
+                    `$result.mensaje = 'SYSTEM LOCK ENGAGED'
                 }
                 'estado' {
-                    $result.mensaje = 'SYSTEM STATUS: NOMINAL'
+                    `$result.mensaje = 'SYSTEM STATUS: NOMINAL'
                 }
                 'log' {
-                    if (Test-Path $logPath) {
-                        $log = Get-Content $logPath -Tail 5
-                        $result.mensaje = 'LAST LOG ENTRIES: ' + ($log -join ' | ')
+                    if (Test-Path `$logPath) {
+                        `$log = Get-Content `$logPath -Tail 5
+                        `$result.mensaje = 'LAST LOG ENTRIES: ' + (`$log -join ' | ')
                     } else {
-                        $result.mensaje = 'NO LOG FILES DETECTED'
+                        `$result.mensaje = 'NO LOG FILES DETECTED'
                     }
                 }
                 'cancelar' {
                     shutdown /a
-                    $result.mensaje = 'SHUTDOWN SEQUENCE ABORTED'
+                    `$result.mensaje = 'SHUTDOWN SEQUENCE ABORTED'
                 }
                 default {
-                    $result.estado = 'error'
-                    $result.mensaje = 'INVALID COMMAND'
+                    `$result.estado = 'error'
+                    `$result.mensaje = 'INVALID COMMAND'
                 }
             }
             
-            $json = $result | ConvertTo-Json
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json; charset=utf-8'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            `$json = `$result | ConvertTo-Json
+            `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$json)
+            `$response.ContentType = 'application/json; charset=utf-8'
+            `$response.ContentLength64 = `$buffer.Length
+            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
         }
         else {
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes('404 - ACCESS DENIED')
-            $response.StatusCode = 404
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            `$buffer = [System.Text.Encoding]::UTF8.GetBytes('404 - ACCESS DENIED')
+            `$response.StatusCode = 404
+            `$response.ContentLength64 = `$buffer.Length
+            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
         }
         
-        $response.Close()
+        `$response.Close()
     }
 } catch {
     Write-Log "ERROR CRITICO: $_"
-    Remove-Item $runningFile -ErrorAction SilentlyContinue
+    Remove-Item `$runningFile -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 30
 }
-'@
+"@
 
-# Script del monitor que verifica cada minuto
-$monitorScript = @'
-param($Port = 8080)
+$monitorScript = @"
+param(`$Port = $Puerto)
 
-$logPath = "$env:TEMP\webserver_monitor_log.txt"
-$runningFile = "$env:TEMP\webserver_running.txt"
+`$logPath = "`$env:TEMP\webserver_monitor_log.txt"
+`$runningFile = "`$env:TEMP\webserver_running.txt"
 
 function Write-Log {
-    param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File $logPath -Append
+    param(`$Message)
+    `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "`$timestamp - `$Message" | Out-File `$logPath -Append
 }
 
 function Start-WebServer {
     Write-Log "Iniciando servidor web..."
     
-    # Matar procesos anteriores
-    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name "powershell" | Where-Object { `$_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     
     Start-Sleep -Seconds 2
     
-    # Iniciar nuevo servidor
-    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Port" -WindowStyle Hidden
+    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port `$Port" -WindowStyle Hidden
     
     Write-Log "Comando de inicio ejecutado"
 }
 
 Write-Log "=== MONITOR INICIADO ==="
 
-# Iniciar servidor al arrancar
 Start-WebServer
 
-$failCount = 0
+`$failCount = 0
 
-while ($true) {
+while (`$true) {
     try {
-        # Verificar si el archivo running existe
-        if (-not (Test-Path $runningFile)) {
+        if (-not (Test-Path `$runningFile)) {
             Write-Log "ADVERTENCIA: Archivo running no encontrado"
-            $failCount++
+            `$failCount++
         } else {
-            # Probar conexión HTTP
-            $test = Invoke-WebRequest -Uri "http://localhost:$Port/info" -TimeoutSec 3 -ErrorAction SilentlyContinue
+            `$test = Invoke-WebRequest -Uri "http://localhost:`$Port/info" -TimeoutSec 3 -ErrorAction SilentlyContinue
             
-            if ($test.StatusCode -eq 200) {
-                $failCount = 0
+            if (`$test.StatusCode -eq 200) {
+                `$failCount = 0
                 Write-Log "Servidor OK (verificación cada minuto)"
             } else {
-                $failCount++
-                Write-Log "Respuesta inesperada: $($test.StatusCode) (Fallo $failCount/3)"
+                `$failCount++
+                Write-Log "Respuesta inesperada: $(`$test.StatusCode) (Fallo `$failCount/3)"
             }
         }
     } catch {
-        $failCount++
-        Write-Log "Error de conexión: $_ (Fallo $failCount/3)"
+        `$failCount++
+        Write-Log "Error de conexión: `$_ (Fallo `$failCount/3)"
     }
     
-    # Verificar si el proceso existe
-    $process = Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } -ErrorAction SilentlyContinue
-    if (-not $process) {
+    `$process = Get-Process -Name "powershell" | Where-Object { `$_.CommandLine -like "*WebServer.ps1*" } -ErrorAction SilentlyContinue
+    if (-not `$process) {
         Write-Log "Proceso del servidor no encontrado"
-        $failCount++
+        `$failCount++
     }
     
-    # Si hay 3 fallos consecutivos, reiniciar
-    if ($failCount -ge 3) {
+    if (`$failCount -ge 3) {
         Write-Log "3 FALLOS CONSECUTIVOS - REINICIANDO SERVIDOR"
         Start-WebServer
-        $failCount = 0
-        Remove-Item $runningFile -ErrorAction SilentlyContinue
+        `$failCount = 0
+        Remove-Item `$runningFile -ErrorAction SilentlyContinue
     }
     
-    # Esperar 60 segundos
     Start-Sleep -Seconds 60
 }
-'@
+"@
 
-# Reemplazar el puerto en los scripts
-$webScript = $webScript -replace '\$Port', $Puerto
-$monitorScript = $monitorScript -replace '\$Port', $Puerto
-
-# Guardar scripts
 $webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8 -Force
 $monitorScript | Out-File "C:\Windows\System32\WebMonitor.ps1" -Encoding UTF8 -Force
 
@@ -438,18 +415,22 @@ netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow p
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "3. Creando tareas programadas..." -ForegroundColor Yellow
+Write-Host "3. Reservando URL para todos los usuarios..." -ForegroundColor Yellow
+netsh http delete urlacl url=http://*:$Puerto/ 2>$null
+netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
+netsh http delete urlacl url=http://+:1-65535/ 2>$null
+Write-Host "  OK - URL reservada" -ForegroundColor Green
 
-# Eliminar tareas anteriores
+Write-Host ""
+Write-Host "4. Creando tareas programadas..." -ForegroundColor Yellow
+
 schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
 schtasks /delete /tn "PCWeb_Monitor_$userName`_backup" /f 2>$null
 
 $taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto"
 
-# Tarea principal al iniciar sesión
 schtasks /create /tn "PCWeb_Monitor_$userName" /tr "$taskCommand" /sc onlogon /ru $currentUser /rl HIGHEST /f 2>$null
 
-# Tarea cada minuto (backup)
 schtasks /create /tn "PCWeb_Monitor_$userName`_backup" /tr "$taskCommand" /sc minute /mo 1 /ru $currentUser /rl HIGHEST /f 2>$null
 
 Write-Host "  OK - Tareas programadas creadas:" -ForegroundColor Green
@@ -457,28 +438,26 @@ Write-Host "    - PCWeb_Monitor_$userName (al iniciar sesión)"
 Write-Host "    - PCWeb_Monitor_${userName}_backup (cada 1 minuto)"
 
 Write-Host ""
-Write-Host "4. Iniciando servidor web y monitor..." -ForegroundColor Yellow
+Write-Host "5. Iniciando servidor web y monitor..." -ForegroundColor Yellow
 
-# Matar procesos anteriores
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 
 Start-Sleep -Seconds 2
 
-# Iniciar monitor (que iniciará el servidor)
 Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto" -WindowStyle Hidden
 
 Start-Sleep -Seconds 5
 
 Write-Host ""
-Write-Host "5. Probando conexión..." -ForegroundColor Yellow
+Write-Host "6. Probando conexion..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
 for ($i = 1; $i -le 10; $i++) {
     try {
         $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
         if ($test.nombre) {
-            Write-Host "  OK - CONEXIÓN EXITOSA (Intento $i/10)" -ForegroundColor Green
+            Write-Host "  OK - CONEXION EXITOSA (Intento $i/10)" -ForegroundColor Green
             Write-Host "    PC: $($test.nombre)" -ForegroundColor White
             Write-Host "    Usuario: $($test.usuario)" -ForegroundColor White
             $conexionExitosa = $true
@@ -492,10 +471,9 @@ for ($i = 1; $i -le 10; $i++) {
 
 if (-not $conexionExitosa) {
     Write-Host "  ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
-    Write-Host "  El monitor intentará reiniciarlo automáticamente" -ForegroundColor White
+    Write-Host "  El monitor intentara reiniciarlo automaticamente" -ForegroundColor White
 }
 
-# Obtener IP local
 try {
     $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254.*"}).IPAddress | Select-Object -First 1
     if (-not $ip) {
@@ -507,7 +485,7 @@ try {
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   INSTALACIÓN COMPLETADA" -ForegroundColor Cyan
+Write-Host "   INSTALACION COMPLETADA" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "URL DE ACCESO LOCAL:" -ForegroundColor Yellow
@@ -529,7 +507,7 @@ Write-Host "  * Verifica cada 60 segundos que el servidor responda"
 Write-Host "  * Si falla 3 veces seguidas, lo reinicia automáticamente"
 Write-Host "  * Tarea principal al iniciar sesión"
 Write-Host "  * Tarea backup cada 1 minuto"
-Write-Host "  * Logs en %TEMP%\webserver_log.txt y webserver_monitor_log.txt"
+Write-Host "  * Logs en %TEMP%\webserver_log.txt y %TEMP%\webserver_monitor_log.txt"
 Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
 Write-Host "  Servidor: C:\Windows\System32\WebServer.ps1"
@@ -540,4 +518,5 @@ Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar"
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
+
 Read-Host "Presiona Enter para salir"
