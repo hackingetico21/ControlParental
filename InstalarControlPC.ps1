@@ -13,14 +13,18 @@ if ($Desinstalar) {
     netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
     
     $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    Remove-ItemProperty -Path $regPath -Name "PCWebControl" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $regPath -Name "PCWebControl" -ErrorAction SilentlyContinue 2>$null
     
     $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PCWeb.lnk"
-    Remove-Item $shortcutPath -ErrorAction SilentlyContinue
+    if (Test-Path $shortcutPath) {
+        Remove-Item $shortcutPath -Force -ErrorAction SilentlyContinue
+    }
     
-    Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
+    if (Test-Path "C:\Windows\System32\WebServer.ps1") {
+        Remove-Item "C:\Windows\System32\WebServer.ps1" -Force -ErrorAction SilentlyContinue
+    }
     
-    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
     
     Write-Host "SERVIDOR WEB DESINSTALADO" -ForegroundColor Green
     exit
@@ -28,7 +32,11 @@ if ($Desinstalar) {
 
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Host "Solicitando permisos de administrador..." -ForegroundColor Yellow
-    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Puerto $Puerto" -Verb RunAs
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Puerto $Puerto"
+    if ($Desinstalar) {
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Desinstalar"
+    }
+    Start-Process powershell.exe -ArgumentList $arguments -Verb RunAs
     exit
 }
 
@@ -226,7 +234,9 @@ try {
     $listener.Prefixes.Add("http://+:$Port/")
     $listener.Start()
     
-    Write-Host "Servidor web iniciado en puerto $Port"
+    # Crear archivo de log para verificar que está funcionando
+    $logPath = "$env:TEMP\webserver_log.txt"
+    "$(Get-Date) - Servidor web iniciado en puerto $Port" | Out-File $logPath -Append
     
     while ($true) {
         $context = $listener.GetContext()
@@ -238,6 +248,7 @@ try {
             $response.ContentType = 'text/html; charset=utf-8'
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            "$(Get-Date) - Página principal servida a $($request.RemoteEndPoint)" | Out-File $logPath -Append
         }
         elseif ($request.Url.LocalPath -eq '/info') {
             $info = @{
@@ -258,6 +269,8 @@ try {
             
             $result = @{estado = 'ok'; mensaje = ''}
             
+            "$(Get-Date) - Comando recibido: $($data.accion) desde $($request.RemoteEndPoint)" | Out-File $logPath -Append
+            
             switch ($data.accion) {
                 'apagar' {
                     shutdown /s /f /t 0
@@ -275,8 +288,8 @@ try {
                     $result.mensaje = 'SYSTEM STATUS: NOMINAL'
                 }
                 'log' {
-                    if (Test-Path "$env:TEMP\pclog.txt") {
-                        $log = Get-Content "$env:TEMP\pclog.txt" -Tail 5
+                    if (Test-Path $logPath) {
+                        $log = Get-Content $logPath -Tail 5
                         $result.mensaje = 'LAST LOG ENTRIES: ' + ($log -join ' | ')
                     } else {
                         $result.mensaje = 'NO LOG FILES DETECTED'
@@ -308,66 +321,97 @@ try {
         $response.Close()
     }
 } catch {
+    $errorMsg = "$(Get-Date) - ERROR: $_" 
+    $errorMsg | Out-File $logPath -Append
     Write-Host "Error: $_"
 }
 '@
 
 $webScript = $webScript -replace '\$Port', $Puerto
 
-$webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8
+$webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8 -Force
 
-Write-Host "✓ Script creado en C:\Windows\System32\WebServer.ps1" -ForegroundColor Green
+Write-Host "  OK - Script creado en C:\Windows\System32\WebServer.ps1" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
 netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
 netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
-Write-Host "✓ Regla de firewall agregada" -ForegroundColor Green
+Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "3. Configurando inicio automático..." -ForegroundColor Yellow
+Write-Host "3. Configurando inicio automatico..." -ForegroundColor Yellow
 
 $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $regValue = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-New-ItemProperty -Path $regPath -Name "PCWebControl" -Value $regValue -PropertyType String -Force 2>$null
-Write-Host "✓ Entrada agregada al registro (HKCU\Run)" -ForegroundColor Green
+try {
+    Set-ItemProperty -Path $regPath -Name "PCWebControl" -Value $regValue -Type String -Force -ErrorAction Stop
+    Write-Host "  OK - Entrada agregada al registro (HKCU\Run)" -ForegroundColor Green
+} catch {
+    Write-Host "  ERROR: No se pudo agregar entrada al registro: $_" -ForegroundColor Red
+}
 
-$shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PCWeb.lnk"
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut($shortcutPath)
-$Shortcut.TargetPath = "powershell.exe"
-$Shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-$Shortcut.WindowStyle = 7
-$Shortcut.Save()
-Write-Host "✓ Acceso directo creado en carpeta Startup" -ForegroundColor Green
+try {
+    $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PCWeb.lnk"
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+    $Shortcut.TargetPath = "powershell.exe"
+    $Shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
+    $Shortcut.WindowStyle = 7
+    $Shortcut.Save()
+    Write-Host "  OK - Acceso directo creado en carpeta Startup" -ForegroundColor Green
+} catch {
+    Write-Host "  ERROR: No se pudo crear acceso directo: $_" -ForegroundColor Red
+}
 
 Write-Host ""
 Write-Host "4. Iniciando servidor web..." -ForegroundColor Yellow
+
+Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
+Start-Sleep -Seconds 1
 
 Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
 
 Start-Sleep -Seconds 3
 
 Write-Host ""
-Write-Host "5. Probando conexión..." -ForegroundColor Yellow
+Write-Host "5. Probando conexion..." -ForegroundColor Yellow
 
-try {
-    $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 5 -ErrorAction SilentlyContinue
-    if ($test.nombre) {
-        Write-Host "✓ CONEXIÓN EXITOSA" -ForegroundColor Green
-        Write-Host "  PC: $($test.nombre)" -ForegroundColor White
-        Write-Host "  Usuario: $($test.usuario)" -ForegroundColor White
+$conexionExitosa = $false
+for ($i = 1; $i -le 3; $i++) {
+    try {
+        $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
+        if ($test.nombre) {
+            Write-Host "  OK - CONEXION EXITOSA (Intento $i/3)" -ForegroundColor Green
+            Write-Host "    PC: $($test.nombre)" -ForegroundColor White
+            Write-Host "    Usuario: $($test.usuario)" -ForegroundColor White
+            $conexionExitosa = $true
+            break
+        }
+    } catch {
+        Write-Host "  Intentando conectar... (Intento $i/3)" -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
     }
-} catch {
-    Write-Host "⚠ ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
-    Write-Host "  El servidor puede tardar unos segundos en iniciar" -ForegroundColor White
 }
 
-$ip = (Test-Connection -ComputerName $computerName -Count 1).IPV4Address.IPAddressToString
+if (-not $conexionExitosa) {
+    Write-Host "  ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
+    Write-Host "  El servidor puede tardar unos segundos en iniciar" -ForegroundColor White
+    Write-Host "  Puedes verificar manualmente en: http://localhost:$Puerto" -ForegroundColor White
+}
+
+try {
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254.*"}).IPAddress | Select-Object -First 1
+    if (-not $ip) {
+        $ip = (Test-Connection -ComputerName $computerName -Count 1).IPV4Address.IPAddressToString
+    }
+} catch {
+    $ip = "192.168.x.x"
+}
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   INSTALACIÓN COMPLETADA" -ForegroundColor Cyan
+Write-Host "   INSTALACION COMPLETADA" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "URL DE ACCESO:" -ForegroundColor Yellow
@@ -375,16 +419,20 @@ Write-Host "  Local:    http://localhost:$Puerto"
 Write-Host "  Red:      http://$($ip):$Puerto"
 Write-Host ""
 Write-Host "COMANDOS DISPONIBLES:" -ForegroundColor Yellow
-Write-Host "  ⏻ SHUTDOWN    - Apagar el equipo"
-Write-Host "  ↻ REBOOT       - Reiniciar el equipo"
-Write-Host "  🔒 LOCK SYSTEM - Bloquear la sesión"
-Write-Host "  ✓ STATUS CHECK - Verificar estado"
-Write-Host "  📊 SYSTEM LOGS - Ver logs (si existen)"
-Write-Host "  ✖ ABORT        - Cancelar apagado pendiente"
+Write-Host "  [SHUTDOWN]    - Apagar el equipo"
+Write-Host "  [REBOOT]      - Reiniciar el equipo"
+Write-Host "  [LOCK SYSTEM] - Bloquear la sesion"
+Write-Host "  [STATUS CHECK]- Verificar estado"
+Write-Host "  [SYSTEM LOGS] - Ver logs"
+Write-Host "  [ABORT]       - Cancelar apagado"
 Write-Host ""
-Write-Host "INICIO AUTOMÁTICO:" -ForegroundColor Yellow
-Write-Host "  ✓ Registro de Windows (HKCU\Run)"
-Write-Host "  ✓ Carpeta Startup"
+Write-Host "INICIO AUTOMATICO:" -ForegroundColor Yellow
+Write-Host "  * Registro de Windows (HKCU\Run)"
+Write-Host "  * Carpeta Startup"
+Write-Host ""
+Write-Host "ARCHIVOS:" -ForegroundColor Yellow
+Write-Host "  Script: C:\Windows\System32\WebServer.ps1"
+Write-Host "  Log:    %TEMP%\webserver_log.txt"
 Write-Host ""
 Write-Host "PARA DESINSTALAR:" -ForegroundColor Yellow
 Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar"
@@ -392,4 +440,4 @@ Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
-$null = Read-Host "Presiona Enter para salir"
+Read-Host "Presiona Enter para salir"
