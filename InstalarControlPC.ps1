@@ -10,16 +10,15 @@ $computerName = $env:COMPUTERNAME
 if ($Desinstalar) {
     Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
-    schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
-    schtasks /delete /tn "PCWeb_Monitor_$userName`_backup" /f 2>$null
+    schtasks /delete /tn "PCWeb_$userName" /f 2>$null
     
     netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
     
+    netsh http delete urlacl url=http://*:$Puerto/ 2>$null
+    
     Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
-    Remove-Item "C:\Windows\System32\WebMonitor.ps1" -ErrorAction SilentlyContinue
     
     Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     
     Write-Host "SERVIDOR WEB DESINSTALADO" -ForegroundColor Green
     exit
@@ -39,179 +38,13 @@ Write-Host "PC: $computerName"
 Write-Host "Puerto: $Puerto"
 Write-Host ""
 
-Write-Host "1. Creando scripts..." -ForegroundColor Yellow
+Write-Host "1. Creando script unificado..." -ForegroundColor Yellow
 
 $webScript = @'
-param($Port)
+param($Port = 8080)
 
-$logPath = "$env:TEMP\webserver_log.txt"
-$runningFile = "$env:TEMP\webserver_running.txt"
-
-function Write-Log {
-    param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File $logPath -Append
-}
-
-Write-Log "=== SERVIDOR WEB INICIADO ==="
-Write-Log "Puerto: $Port"
-Write-Log "Usuario: $env:USERNAME"
-Write-Log "Computadora: $env:COMPUTERNAME"
-
-$simpleHTML = @"
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>SYSTEM CONTROL</title>
-<style>
-body{background:black;color:#0f0;font-family:monospace;margin:0;padding:20px;}
-.container{max-width:800px;margin:0 auto;}
-.btn{background:#111;border:1px solid #0f0;color:#0f0;padding:15px;margin:5px;cursor:pointer;display:inline-block;width:150px;text-align:center;}
-.btn:hover{background:#0f0;color:#000;}
-.status{background:#111;padding:10px;margin:10px 0;}
-.console{background:#000;border:1px solid #0f0;padding:10px;margin:10px 0;height:150px;overflow-y:auto;}
-.footer{text-align:center;margin-top:20px;color:#0f0;}
-</style>
-</head>
-<body>
-<div class="container">
-<div class="status">
-<div>HOSTNAME: <span id="pcName">---</span></div>
-<div>USER: <span id="pcUser">---</span></div>
-<div>TIME: <span id="pcTime">---</span></div>
-</div>
-<div>
-<div class="btn" onclick="executeCommand('apagar')">SHUTDOWN</div>
-<div class="btn" onclick="executeCommand('reiniciar')">REBOOT</div>
-<div class="btn" onclick="executeCommand('bloquear')">LOCK</div>
-<div class="btn" onclick="executeCommand('estado')">STATUS</div>
-<div class="btn" onclick="executeCommand('log')">LOGS</div>
-<div class="btn" onclick="executeCommand('cancelar')">ABORT</div>
-</div>
-<div class="console" id="consoleOutput">
-<div>> <span id="outputText"></span></div>
-</div>
-<div class="footer">PORT: $Port</div>
-</div>
-<script>
-function updateSystemInfo(){
-fetch('/info').then(r=>r.json()).then(d=>{
-document.getElementById('pcName').textContent=d.nombre;
-document.getElementById('pcUser').textContent=d.usuario;
-document.getElementById('pcTime').textContent=d.hora;
-});
-}
-function executeCommand(command){
-const output=document.getElementById('outputText');
-output.innerHTML='>> INICIANDO: '+command+'...<br>';
-fetch('/cmd',{
-method:'POST',
-headers:{'Content-Type':'application/json'},
-body:JSON.stringify({accion:command})
-}).then(r=>r.json()).then(data=>{
-output.innerHTML+='>> RESPUESTA: '+data.mensaje+'<br>';
-});
-}
-updateSystemInfo();
-setInterval(()=>{
-const now=new Date();
-document.getElementById('pcTime').textContent=
-now.getHours()+':'+now.getMinutes()+':'+now.getSeconds();
-},1000);
-</script>
-</body>
-</html>
-"@
-
-try {
-    Remove-Item $runningFile -ErrorAction SilentlyContinue
-    
-    $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add("http://*:$Port/")
-    $listener.Start()
-    
-    Write-Log "Servidor escuchando en http://*:$Port/"
-    "RUNNING" | Out-File $runningFile -Force
-    
-    while ($true) {
-        $context = $listener.GetContext()
-        $request = $context.Request
-        $response = $context.Response
-        
-        if ($request.Url.LocalPath -eq '/' -or $request.Url.LocalPath -eq '') {
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($simpleHTML)
-            $response.ContentType = 'text/html'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            $response.Close()
-        }
-        elseif ($request.Url.LocalPath -eq '/info') {
-            $info = @{
-                nombre = $env:COMPUTERNAME
-                usuario = $env:USERNAME
-                hora = (Get-Date).ToString('HH:mm:ss')
-            }
-            $json = $info | ConvertTo-Json
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            $response.Close()
-        }
-        elseif ($request.Url.LocalPath -eq '/cmd' -and $request.HttpMethod -eq 'POST') {
-            $reader = New-Object System.IO.StreamReader($request.InputStream)
-            $body = $reader.ReadToEnd()
-            $data = $body | ConvertFrom-Json
-            
-            $result = @{estado = 'ok'; mensaje = ''}
-            
-            Write-Log "Comando: $($data.accion)"
-            
-            switch ($data.accion) {
-                'apagar' { shutdown /s /f /t 0; $result.mensaje = 'APAGANDO...' }
-                'reiniciar' { shutdown /r /f /t 0; $result.mensaje = 'REINICIANDO...' }
-                'bloquear' { rundll32.exe user32.dll,LockWorkStation; $result.mensaje = 'BLOQUEADO' }
-                'estado' { $result.mensaje = 'SISTEMA OK' }
-                'log' { 
-                    if (Test-Path $logPath) { 
-                        $log = Get-Content $logPath -Tail 3
-                        $result.mensaje = ($log -join ' | ')
-                    } else { 
-                        $result.mensaje = 'NO LOGS' 
-                    }
-                }
-                'cancelar' { shutdown /a; $result.mensaje = 'APAGADO CANCELADO' }
-                default { $result.estado = 'error'; $result.mensaje = 'COMANDO INVALIDO' }
-            }
-            
-            $json = $result | ConvertTo-Json
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            $response.Close()
-        }
-        else {
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes('404')
-            $response.StatusCode = 404
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            $response.Close()
-        }
-    }
-} catch {
-    Write-Log "ERROR: $_"
-    Remove-Item $runningFile -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 30
-}
-'@
-
-$monitorScript = @'
-param($Port)
-
-$logPath = "$env:TEMP\webserver_monitor_log.txt"
-$runningFile = "$env:TEMP\webserver_running.txt"
+$logPath = "C:\Windows\System32\WebServer.log"
+$runningFile = "C:\Windows\System32\WebServer.running"
 
 function Write-Log {
     param($Message)
@@ -220,66 +53,130 @@ function Write-Log {
 }
 
 function Start-WebServer {
-    Write-Log "Iniciando servidor web..."
+    Write-Log "=== INICIANDO SERVIDOR WEB PUERTO $Port ==="
     
-    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    
-    Start-Sleep -Seconds 2
-    
-    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Port" -WindowStyle Hidden
-    
-    Write-Log "Comando ejecutado"
-}
-
-Write-Log "=== MONITOR INICIADO ==="
-
-Start-WebServer
-
-$failCount = 0
-
-while ($true) {
     try {
-        if (Test-Path $runningFile) {
-            $test = Invoke-WebRequest -Uri "http://localhost:$Port/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
+        $listener = New-Object System.Net.HttpListener
+        $listener.Prefixes.Add("http://*:$Port/")
+        $listener.Start()
+        
+        "RUNNING" | Out-File $runningFile -Force
+        Write-Log "Servidor iniciado correctamente"
+        
+        while ($true) {
+            $context = $listener.GetContext()
+            $request = $context.Request
+            $response = $context.Response
             
-            if ($test.StatusCode -eq 200) {
-                $failCount = 0
-            } else {
-                $failCount++
-                Write-Log "Fallo $failCount/3 - Codigo: $($test.StatusCode)"
+            if ($request.Url.LocalPath -eq '/' -or $request.Url.LocalPath -eq '') {
+                $html = @"
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>CONTROL PC</title>
+<style>
+body{background:#000;color:#0f0;font-family:monospace;padding:20px;}
+.btn{background:#111;border:1px solid #0f0;color:#0f0;padding:10px;margin:5px;cursor:pointer;width:150px;text-align:center;display:inline-block;}
+.btn:hover{background:#0f0;color:#000;}
+.status{background:#111;padding:10px;margin:10px 0;}
+.console{background:#111;border:1px solid #0f0;padding:10px;margin:10px 0;height:100px;overflow:auto;}
+</style>
+</head>
+<body>
+<div class="status">
+<div>PC: <span id="pcName">---</span></div>
+<div>USUARIO: <span id="pcUser">---</span></div>
+<div>HORA: <span id="pcTime">---</span></div>
+</div>
+<div>
+<div class="btn" onclick="send('apagar')">APAGAR</div>
+<div class="btn" onclick="send('reiniciar')">REINICIAR</div>
+<div class="btn" onclick="send('bloquear')">BLOQUEAR</div>
+<div class="btn" onclick="send('estado')">ESTADO</div>
+<div class="btn" onclick="send('cancelar')">CANCELAR</div>
+</div>
+<div class="console" id="output"></div>
+<script>
+function send(cmd){
+document.getElementById('output').innerHTML = '>> '+cmd;
+fetch('/cmd', {
+method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({accion:cmd})
+}).then(r=>r.json()).then(d=>{
+document.getElementById('output').innerHTML = d.mensaje;
+});
+}
+function update(){
+fetch('/info').then(r=>r.json()).then(d=>{
+document.getElementById('pcName').innerText = d.nombre;
+document.getElementById('pcUser').innerText = d.usuario;
+document.getElementById('pcTime').innerText = d.hora;
+});
+}
+update();
+setInterval(update,1000);
+</script>
+</body>
+</html>
+"@
+                $buffer = [System.Text.Encoding]::UTF8.GetBytes($html)
+                $response.ContentType = 'text/html'
+                $response.OutputStream.Write($buffer, 0, $buffer.Length)
             }
-        } else {
-            $failCount++
-            Write-Log "Fallo $failCount/3 - Sin archivo running"
+            elseif ($request.Url.LocalPath -eq '/info') {
+                $info = @{
+                    nombre = $env:COMPUTERNAME
+                    usuario = $env:USERNAME
+                    hora = (Get-Date).ToString('HH:mm:ss')
+                }
+                $json = $info | ConvertTo-Json
+                $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
+                $response.ContentType = 'application/json'
+                $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            }
+            elseif ($request.Url.LocalPath -eq '/cmd' -and $request.HttpMethod -eq 'POST') {
+                $reader = New-Object System.IO.StreamReader($request.InputStream)
+                $body = $reader.ReadToEnd()
+                $data = $body | ConvertFrom-Json
+                
+                switch ($data.accion) {
+                    'apagar' { shutdown /s /f /t 0; $msg = 'APAGANDO...' }
+                    'reiniciar' { shutdown /r /f /t 0; $msg = 'REINICIANDO...' }
+                    'bloquear' { rundll32.exe user32.dll,LockWorkStation; $msg = 'BLOQUEADO' }
+                    'estado' { $msg = 'SISTEMA OK' }
+                    'cancelar' { shutdown /a; $msg = 'CANCELADO' }
+                    default { $msg = 'COMANDO INVALIDO' }
+                }
+                
+                $result = @{mensaje = $msg}
+                $json = $result | ConvertTo-Json
+                $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
+                $response.ContentType = 'application/json'
+                $response.OutputStream.Write($buffer, 0, $buffer.Length)
+                Write-Log "Comando: $($data.accion) - $msg"
+            }
+            else {
+                $response.StatusCode = 404
+            }
+            
+            $response.Close()
         }
     } catch {
-        $failCount++
-        Write-Log "Fallo $failCount/3 - Error conexion"
-    }
-    
-    $process = Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } -ErrorAction SilentlyContinue
-    if (-not $process) {
-        $failCount++
-        Write-Log "Fallo $failCount/3 - Proceso no existe"
-    }
-    
-    if ($failCount -ge 3) {
-        Write-Log "REINICIANDO SERVIDOR"
-        Start-WebServer
-        $failCount = 0
+        Write-Log "ERROR CRITICO: $_"
         Remove-Item $runningFile -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 30
+        Start-WebServer
     }
-    
-    Start-Sleep -Seconds 60
 }
+
+Start-WebServer
 '@
 
 $webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8 -Force
-$monitorScript | Out-File "C:\Windows\System32\WebMonitor.ps1" -Encoding UTF8 -Force
 
-Write-Host "  OK - Scripts creados:" -ForegroundColor Green
-Write-Host "    - C:\Windows\System32\WebServer.ps1" 
-Write-Host "    - C:\Windows\System32\WebMonitor.ps1"
+Write-Host "  OK - Script creado: C:\Windows\System32\WebServer.ps1" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
@@ -294,33 +191,76 @@ netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
 Write-Host "  OK - URL reservada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Creando tareas..." -ForegroundColor Yellow
+Write-Host "4. Creando tarea programada que se ejecuta al inicio y cada minuto..." -ForegroundColor Yellow
 
-schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
-schtasks /delete /tn "PCWeb_Monitor_$userName`_backup" /f 2>$null
+schtasks /delete /tn "PCWeb_$userName" /f 2>$null
 
-$taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto"
+$taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
 
-schtasks /create /tn "PCWeb_Monitor_$userName" /tr "$taskCommand" /sc onlogon /ru $currentUser /rl HIGHEST /f 2>$null
+$xmlPath = "$env:TEMP\task.xml"
+@"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>$(Get-Date -Format "yyyy-MM-ddTHH:mm:ss")</Date>
+    <Author>$userName</Author>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT1M</Delay>
+    </BootTrigger>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT1M</Interval>
+        <Duration>P1D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>$(Get-Date -Format "yyyy-MM-dd")T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$currentUser</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <Enabled>true</Enabled>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <RestartOnFailure>
+      <Interval>PT5M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Windows\System32\WebServer.ps1" -Port $Puerto</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@ | Out-File $xmlPath -Encoding UTF8
 
-schtasks /create /tn "PCWeb_Monitor_$userName`_backup" /tr "$taskCommand" /sc minute /mo 1 /ru $currentUser /rl HIGHEST /f 2>$null
+schtasks /create /tn "PCWeb_$userName" /xml $xmlPath /f 2>$null
+Remove-Item $xmlPath -Force
 
-Write-Host "  OK - Tareas creadas" -ForegroundColor Green
+Write-Host "  OK - Tarea creada: PCWeb_$userName (inicio + cada minuto)" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "5. Iniciando servicios..." -ForegroundColor Yellow
-
+Write-Host "5. Matando procesos anteriores..." -ForegroundColor Yellow
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
-Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
-
 Start-Sleep -Seconds 2
 
-Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto" -WindowStyle Hidden
-
+Write-Host ""
+Write-Host "6. Iniciando servidor..." -ForegroundColor Yellow
+Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
 Start-Sleep -Seconds 5
 
 Write-Host ""
-Write-Host "6. Probando conexion..." -ForegroundColor Yellow
+Write-Host "7. Probando conexion..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
 for ($i = 1; $i -le 10; $i++) {
@@ -341,6 +281,7 @@ for ($i = 1; $i -le 10; $i++) {
 
 if (-not $conexionExitosa) {
     Write-Host "  ADVERTENCIA: No se pudo conectar" -ForegroundColor Yellow
+    Write-Host "  Revisa el log: C:\Windows\System32\WebServer.log" -ForegroundColor White
 }
 
 try {
@@ -357,22 +298,17 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "   INSTALACION COMPLETADA" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "URL LOCAL:" -ForegroundColor Yellow
-Write-Host "  http://localhost:$Puerto"
+Write-Host "URL LOCAL: http://localhost:$Puerto" -ForegroundColor Yellow
+Write-Host "URL RED:   http://$($ip):$Puerto" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "URL RED:" -ForegroundColor Yellow
-Write-Host "  http://$($ip):$Puerto"
+Write-Host "LOG: C:\Windows\System32\WebServer.log" -ForegroundColor White
 Write-Host ""
-Write-Host "COMANDOS:" -ForegroundColor Yellow
-Write-Host "  SHUTDOWN, REBOOT, LOCK, STATUS, LOGS, ABORT"
+Write-Host "TAREA PROGRAMADA: PCWeb_$userName" -ForegroundColor White
+Write-Host "  - Se ejecuta al iniciar Windows" -ForegroundColor White
+Write-Host "  - Se ejecuta cada 1 minuto" -ForegroundColor White
+Write-Host "  - Se reinicia automaticamente si falla" -ForegroundColor White
 Write-Host ""
-Write-Host "MONITOREO:" -ForegroundColor Yellow
-Write-Host "  * Verifica cada 60 segundos"
-Write-Host "  * 3 fallos = reinicio"
-Write-Host "  * Logs en %TEMP%"
-Write-Host ""
-Write-Host "DESINSTALAR:" -ForegroundColor Yellow
-Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar"
+Write-Host "DESINSTALAR: .\InstalarControlPC.ps1 -Desinstalar" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
