@@ -15,9 +15,9 @@ if ($Desinstalar) {
     
     netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
     
-    netsh http delete urlacl url=http://*:$Puerto/ 2>$null
-    netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
-    netsh http delete urlacl url=http://$computerName:$Puerto/ 2>$null
+    netsh http delete urlacl url="http://*:$Puerto/" 2>$null
+    netsh http delete urlacl url="http://localhost:$Puerto/" 2>$null
+    netsh http delete urlacl url="http://${computerName}:$Puerto/" 2>$null
     
     Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
     
@@ -73,7 +73,7 @@ function Start-WebServer {
         
         $listener.Prefixes.Add("http://*:$Port/")
         $listener.Prefixes.Add("http://localhost:$Port/")
-        $listener.Prefixes.Add("http://$computerName:$Port/")
+        $listener.Prefixes.Add("http://${computerName}:$Port/")
         
         $listener.Start()
         
@@ -262,13 +262,13 @@ Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "3. Reservando URL en el sistema..." -ForegroundColor Yellow
-netsh http delete urlacl url=http://*:$Puerto/ 2>$null
-netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
-netsh http delete urlacl url=http://$computerName:$Puerto/ 2>$null
+netsh http delete urlacl url="http://*:$Puerto/" 2>$null
+netsh http delete urlacl url="http://localhost:$Puerto/" 2>$null
+netsh http delete urlacl url="http://${computerName}:$Puerto/" 2>$null
 
-netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
-netsh http add urlacl url=http://localhost:$Puerto/ user=BUILTIN\Users 2>$null
-netsh http add urlacl url=http://$computerName:$Puerto/ user=BUILTIN\Users 2>$null
+netsh http add urlacl url="http://*:$Puerto/" user=BUILTIN\Users 2>$null
+netsh http add urlacl url="http://localhost:$Puerto/" user=BUILTIN\Users 2>$null
+netsh http add urlacl url="http://${computerName}:$Puerto/" user=BUILTIN\Users 2>$null
 Write-Host "  OK - URLs reservadas" -ForegroundColor Green
 
 Write-Host ""
@@ -354,7 +354,7 @@ Write-Host ""
 Write-Host "URL DE ACCESO:" -ForegroundColor Yellow
 Write-Host "  Local:    http://localhost:$Puerto" -ForegroundColor White
 Write-Host "  Red:      http://$($ip):$Puerto" -ForegroundColor White
-Write-Host "  Nombre:   http://$computerName:$Puerto" -ForegroundColor White
+Write-Host "  Nombre:   http://${computerName}:$Puerto" -ForegroundColor White
 Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
 Write-Host "  Script:   C:\Windows\System32\WebServer.ps1" -ForegroundColor White
