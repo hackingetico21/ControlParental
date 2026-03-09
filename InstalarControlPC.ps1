@@ -1,63 +1,46 @@
-param([switch]$Desinstalar, [int]$Puerto = 8080)
+param(
+    [switch]$Desinstalar, 
+    [int]$Puerto = 8080
+)
 
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $userName = $currentUser.Split('\')[1]
 $computerName = $env:COMPUTERNAME
 
 if ($Desinstalar) {
-    Write-Host "DESINSTALANDO SISTEMA..."
-    
-    schtasks /delete /tn "PCHorario_SYSTEM" /f 2>$null
-    schtasks /delete /tn "PCWeb_$userName" /f 2>$null
+    Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
     netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
     
-    Remove-Item "C:\Windows\System32\PCHorario.ps1" -ErrorAction SilentlyContinue
+    $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    Remove-ItemProperty -Path $regPath -Name "PCWebControl" -ErrorAction SilentlyContinue
+    
+    $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PCWeb.lnk"
+    Remove-Item $shortcutPath -ErrorAction SilentlyContinue
+    
     Remove-Item "C:\Windows\System32\WebServer.ps1" -ErrorAction SilentlyContinue
     
-    Write-Host "Sistema desinstalado"
+    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    
+    Write-Host "SERVIDOR WEB DESINSTALADO" -ForegroundColor Green
     exit
 }
 
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Write-Host "Ejecutando como administrador..."
+    Write-Host "Solicitando permisos de administrador..." -ForegroundColor Yellow
     Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Puerto $Puerto" -Verb RunAs
     exit
 }
 
-Write-Host "=== INSTALACION SISTEMA CONTROL PC ==="
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "   INSTALACION SERVIDOR WEB PUERTO $Puerto" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Usuario: $userName"
 Write-Host "PC: $computerName"
 Write-Host "Puerto: $Puerto"
 Write-Host ""
 
-Write-Host "1. Creando scripts..."
-
-$horarioScript = @'
-while($true){
-    $now = Get-Date
-    $dia = $now.DayOfWeek.Value__
-    if($dia -ge 2 -and $dia -le 6){
-        $mes = $now.Month
-        if($mes -ge 3 -and $mes -le 12){
-            $horaFin = 22
-            $minutoFin = 30
-        }else{
-            $horaFin = 23
-            $minutoFin = 59
-        }
-        
-        $minutosActual = $now.Hour * 60 + $now.Minute
-        $minutosInicio = 9 * 60
-        $minutosFin = $horaFin * 60 + $minutoFin
-        
-        if($minutosActual -lt $minutosInicio -or $minutosActual -gt $minutosFin){
-            shutdown /s /f /t 0
-        }
-    }
-    Start-Sleep -Seconds 60
-}
-'@
+Write-Host "1. Creando script del servidor web..." -ForegroundColor Yellow
 
 $webScript = @'
 param($Port = 8080)
@@ -329,41 +312,25 @@ try {
 }
 '@
 
-$horarioScript | Out-File "C:\Windows\System32\PCHorario.ps1" -Encoding UTF8
-$webScript = $webScript -replace '8080', $Puerto
+$webScript = $webScript -replace '\$Port', $Puerto
+
 $webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8
 
-Write-Host "Scripts creados"
+Write-Host "✓ Script creado en C:\Windows\System32\WebServer.ps1" -ForegroundColor Green
 
-Write-Host "2. Configurando firewall..."
+Write-Host ""
+Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
 netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
 netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
+Write-Host "✓ Regla de firewall agregada" -ForegroundColor Green
 
-Write-Host "3. Creando tarea de horario (como SYSTEM)..."
-schtasks /create /tn "PCHorario_SYSTEM" /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\PCHorario.ps1`"" /sc minute /mo 1 /ru SYSTEM /rl HIGHEST /f 2>$null
-
-Write-Host "4. Creando tarea web para usuario $userName (con token interactivo)..."
-
-$taskName = "PCWeb_$userName"
-
-schtasks /delete /tn $taskName /f 2>$null
-
-schtasks /create /tn $taskName `
-    /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" `
-    /sc onlogon `
-    /ru $currentUser `
-    /rl HIGHEST `
-    /f 2>$null
-
-schtasks /change /tn $taskName /ru $currentUser /rp "" 2>$null
-
-Write-Host "5. Configurando registro para ejecutar al inicio..."
+Write-Host ""
+Write-Host "3. Configurando inicio automático..." -ForegroundColor Yellow
 
 $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $regValue = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
 New-ItemProperty -Path $regPath -Name "PCWebControl" -Value $regValue -PropertyType String -Force 2>$null
-
-Write-Host "6. Creando acceso directo en inicio..."
+Write-Host "✓ Entrada agregada al registro (HKCU\Run)" -ForegroundColor Green
 
 $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PCWeb.lnk"
 $WshShell = New-Object -ComObject WScript.Shell
@@ -372,58 +339,57 @@ $Shortcut.TargetPath = "powershell.exe"
 $Shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
 $Shortcut.WindowStyle = 7
 $Shortcut.Save()
+Write-Host "✓ Acceso directo creado en carpeta Startup" -ForegroundColor Green
 
-Write-Host "7. Iniciando servicios ahora..."
+Write-Host ""
+Write-Host "4. Iniciando servidor web..." -ForegroundColor Yellow
 
 Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
 
 Start-Sleep -Seconds 3
 
-schtasks /run /tn "PCHorario_SYSTEM" 2>$null
-
-Write-Host "8. Probando conexion..."
+Write-Host ""
+Write-Host "5. Probando conexión..." -ForegroundColor Yellow
 
 try {
     $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 5 -ErrorAction SilentlyContinue
     if ($test.nombre) {
-        Write-Host "CONEXION EXITOSA" -ForegroundColor Green
+        Write-Host "✓ CONEXIÓN EXITOSA" -ForegroundColor Green
         Write-Host "  PC: $($test.nombre)" -ForegroundColor White
         Write-Host "  Usuario: $($test.usuario)" -ForegroundColor White
     }
 } catch {
-    Write-Host "ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
+    Write-Host "⚠ ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
     Write-Host "  El servidor puede tardar unos segundos en iniciar" -ForegroundColor White
 }
 
 $ip = (Test-Connection -ComputerName $computerName -Count 1).IPV4Address.IPAddressToString
 
 Write-Host ""
-Write-Host "=========================================="
-Write-Host "INSTALACION COMPLETADA"
-Write-Host "=========================================="
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "   INSTALACIÓN COMPLETADA" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "URL DE ACCESO:"
+Write-Host "URL DE ACCESO:" -ForegroundColor Yellow
 Write-Host "  Local:    http://localhost:$Puerto"
 Write-Host "  Red:      http://$($ip):$Puerto"
 Write-Host ""
-Write-Host "CONFIGURACION:"
-Write-Host "  Usuario web: $userName"
-Write-Host "  Horario: L-V 9:00-22:30 (Mar-Dic)"
-Write-Host "           L-V 9:00-23:59 (Ene-Feb)"
+Write-Host "COMANDOS DISPONIBLES:" -ForegroundColor Yellow
+Write-Host "  ⏻ SHUTDOWN    - Apagar el equipo"
+Write-Host "  ↻ REBOOT       - Reiniciar el equipo"
+Write-Host "  🔒 LOCK SYSTEM - Bloquear la sesión"
+Write-Host "  ✓ STATUS CHECK - Verificar estado"
+Write-Host "  📊 SYSTEM LOGS - Ver logs (si existen)"
+Write-Host "  ✖ ABORT        - Cancelar apagado pendiente"
 Write-Host ""
-Write-Host "EL SERVIDOR WEB SE INICIARA AUTOMATICAMENTE:"
-Write-Host "  1. Al iniciar sesion $userName"
-Write-Host "  2. Desde el registro de inicio (HKCU)"
-Write-Host "  3. Desde carpeta Startup"
+Write-Host "INICIO AUTOMÁTICO:" -ForegroundColor Yellow
+Write-Host "  ✓ Registro de Windows (HKCU\Run)"
+Write-Host "  ✓ Carpeta Startup"
 Write-Host ""
-Write-Host "PARA VERIFICAR:"
-Write-Host "  schtasks /query /tn PCWeb_$userName"
-Write-Host "  Abrir navegador: http://localhost:$Puerto"
-Write-Host ""
-Write-Host "PARA DESINSTALAR:"
+Write-Host "PARA DESINSTALAR:" -ForegroundColor Yellow
 Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar"
 Write-Host ""
-Write-Host "=========================================="
+Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $null = Read-Host "Presiona Enter para salir"
