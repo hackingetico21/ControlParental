@@ -41,193 +41,83 @@ Write-Host ""
 
 Write-Host "1. Creando scripts..." -ForegroundColor Yellow
 
-$webScript = @"
-param(`$Port)
+$webScript = @'
+param($Port)
 
-`$logPath = "$env:TEMP\webserver_log.txt"
-`$runningFile = "$env:TEMP\webserver_running.txt"
+$logPath = "$env:TEMP\webserver_log.txt"
+$runningFile = "$env:TEMP\webserver_running.txt"
 
 function Write-Log {
-    param(`$Message)
-    `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "`$timestamp - `$Message" | Out-File `$logPath -Append
+    param($Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File $logPath -Append
 }
 
 Write-Log "=== SERVIDOR WEB INICIADO ==="
-Write-Log "Puerto: `$Port"
+Write-Log "Puerto: $Port"
 Write-Log "Usuario: $env:USERNAME"
 Write-Log "Computadora: $env:COMPUTERNAME"
 
-`$simpleHTML = @"
+$simpleHTML = @"
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SYSTEM CONTROL PANEL</title>
+<title>SYSTEM CONTROL</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;}
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
-body{font-family:'Share Tech Mono',monospace;background:#0a0a0a;color:#00ff00;min-height:100vh;overflow-x:hidden;position:relative;}
-body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(transparent 95%,rgba(0,255,0,0.03)100%);z-index:-1;}
-.glitch{position:absolute;top:0;left:0;width:100%;height:100%;opacity:0.05;background:url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%2300ff00' fill-opacity='0.1' fill-rule='evenodd'/%3E%3C/svg%3E");animation:glitch 20s infinite linear;}
-@keyframes glitch{0%{transform:translate(0,0);}10%{transform:translate(-5px,5px);}20%{transform:translate(5px,-5px);}30%{transform:translate(-3px,3px);}40%{transform:translate(3px,-3px);}50%{transform:translate(-2px,2px);}60%{transform:translate(2px,-2px);}70%{transform:translate(-1px,1px);}80%{transform:translate(1px,-1px);}90%{transform:translate(0,0);}100%{transform:translate(0,0);}}
-.container{max-width:900px;margin:0 auto;padding:20px;position:relative;z-index:1;}
-.terminal-header{background:#111;border:1px solid #00ff00;border-bottom:none;padding:15px;display:flex;align-items:center;box-shadow:0 0 15px rgba(0,255,0,0.3);}
-.terminal-title{font-family:'Orbitron',sans-serif;font-size:1.3rem;color:#00ff00;text-transform:uppercase;letter-spacing:3px;flex-grow:1;}
-.terminal-buttons{display:flex;gap:8px;}
-.terminal-btn{width:12px;height:12px;border-radius:50%;}
-.btn-red{background:#ff5f56;}
-.btn-yellow{background:#ffbd2e;}
-.btn-green{background:#27ca3f;}
-.terminal-body{background:rgba(10,10,10,0.9);border:1px solid #00ff00;padding:0;box-shadow:0 0 20px rgba(0,255,0,0.2);}
-.status-bar{background:#111;padding:10px 15px;border-bottom:1px solid #00ff00;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
-.status-item{padding:5px;}
-.status-label{color:#aaa;font-size:0.8rem;margin-bottom:3px;}
-.status-value{color:#00ff00;font-weight:bold;font-size:1rem;}
-.cyber-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;padding:20px;}
-@media(max-width:768px){.cyber-grid{grid-template-columns:repeat(2,1fr);}}
-@media(max-width:480px){.cyber-grid{grid-template-columns:1fr;}}
-.cyber-btn{background:rgba(0,30,0,0.3);border:1px solid #00ff00;padding:20px;text-align:center;cursor:pointer;transition:all 0.3s;position:relative;overflow:hidden;}
-.cyber-btn::before{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(0,255,0,0.2),transparent);transition:0.5s;}
-.cyber-btn:hover::before{left:100%;}
-.cyber-btn:hover{background:rgba(0,50,0,0.5);box-shadow:0 0 15px rgba(0,255,0,0.4);transform:translateY(-2px);}
-.btn-icon{font-size:2rem;margin-bottom:10px;color:#00ff00;}
-.btn-text{font-size:1rem;color:#00ff00;text-transform:uppercase;letter-spacing:1px;}
-.console-output{background:#000;border:1px solid #00ff00;margin:20px;padding:15px;min-height:100px;font-family:'Share Tech Mono',monospace;font-size:0.9rem;display:none;white-space:pre-wrap;overflow-y:auto;max-height:200px;}
-.console-output.active{display:block;}
-.prompt{color:#00ff00;}
-.blink{animation:blink 1s infinite;}
-@keyframes blink{0%{opacity:1;}50%{opacity:0;}100%{opacity:1;}}
-.footer{text-align:center;padding:15px;color:#0a0;font-size:0.8rem;border-top:1px solid #003300;}
-.system-info{color:#0f0;text-shadow:0 0 5px #0f0;}
-.scan-line{position:absolute;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,transparent,#00ff00,transparent);animation:scan 3s linear infinite;z-index:2;}
-@keyframes scan{0%{top:0;}100%{top:100%;}}
-.data-stream{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:-1;opacity:0.1;}
-.data-byte{position:absolute;color:#0f0;font-size:1rem;animation:fall linear infinite;}
-@keyframes fall{0%{top:-10px;opacity:1;}100%{top:100vh;opacity:0;}}
+body{background:black;color:#0f0;font-family:monospace;margin:0;padding:20px;}
+.container{max-width:800px;margin:0 auto;}
+.btn{background:#111;border:1px solid #0f0;color:#0f0;padding:15px;margin:5px;cursor:pointer;display:inline-block;width:150px;text-align:center;}
+.btn:hover{background:#0f0;color:#000;}
+.status{background:#111;padding:10px;margin:10px 0;}
+.console{background:#000;border:1px solid #0f0;padding:10px;margin:10px 0;height:150px;overflow-y:auto;}
+.footer{text-align:center;margin-top:20px;color:#0f0;}
 </style>
 </head>
 <body>
-<div class="scan-line"></div>
-<div class="data-stream" id="dataStream"></div>
-<div class="glitch"></div>
 <div class="container">
-<div class="terminal-header">
-<div class="terminal-buttons">
-<div class="terminal-btn btn-red"></div>
-<div class="terminal-btn btn-yellow"></div>
-<div class="terminal-btn btn-green"></div>
+<div class="status">
+<div>HOSTNAME: <span id="pcName">---</span></div>
+<div>USER: <span id="pcUser">---</span></div>
+<div>TIME: <span id="pcTime">---</span></div>
 </div>
-<div class="terminal-title">SYSTEM CONTROL v2.1.4</div>
+<div>
+<div class="btn" onclick="executeCommand('apagar')">SHUTDOWN</div>
+<div class="btn" onclick="executeCommand('reiniciar')">REBOOT</div>
+<div class="btn" onclick="executeCommand('bloquear')">LOCK</div>
+<div class="btn" onclick="executeCommand('estado')">STATUS</div>
+<div class="btn" onclick="executeCommand('log')">LOGS</div>
+<div class="btn" onclick="executeCommand('cancelar')">ABORT</div>
 </div>
-<div class="terminal-body">
-<div class="status-bar">
-<div class="status-item">
-<div class="status-label">HOSTNAME</div>
-<div class="status-value" id="pcName">[LOADING]</div>
+<div class="console" id="consoleOutput">
+<div>> <span id="outputText"></span></div>
 </div>
-<div class="status-item">
-<div class="status-label">USER</div>
-<div class="status-value" id="pcUser">[ACCESSING]</div>
-</div>
-<div class="status-item">
-<div class="status-label">TIME</div>
-<div class="status-value" id="pcTime">--:--:--</div>
-</div>
-</div>
-<div class="cyber-grid">
-<div class="cyber-btn" onclick="executeCommand('apagar')">
-<div class="btn-icon">⏻</div>
-<div class="btn-text">SHUTDOWN</div>
-</div>
-<div class="cyber-btn" onclick="executeCommand('reiniciar')">
-<div class="btn-icon">↻</div>
-<div class="btn-text">REBOOT</div>
-</div>
-<div class="cyber-btn" onclick="executeCommand('bloquear')">
-<div class="btn-icon">🔒</div>
-<div class="btn-text">LOCK SYSTEM</div>
-</div>
-<div class="cyber-btn" onclick="executeCommand('estado')">
-<div class="btn-icon">✓</div>
-<div class="btn-text">STATUS CHECK</div>
-</div>
-<div class="cyber-btn" onclick="executeCommand('log')">
-<div class="btn-icon">📊</div>
-<div class="btn-text">SYSTEM LOGS</div>
-</div>
-<div class="cyber-btn" onclick="executeCommand('cancelar')">
-<div class="btn-icon">✖</div>
-<div class="btn-text">ABORT</div>
-</div>
-</div>
-<div class="console-output" id="consoleOutput">
-<div class="prompt">root@system:~# <span class="blink">_</span></div>
-<div id="outputText"></div>
-</div>
-</div>
-<div class="footer">
-<span class="system-info">ACCESS: AUTHORIZED | PORT: <span id="portNumber">`$Port</span> | PROTOCOL: HTTP/1.1</span>
-</div>
+<div class="footer">PORT: $Port</div>
 </div>
 <script>
-function createDataStream(){
-const stream=document.getElementById('dataStream');
-const chars='01';
-for(let i=0;i<50;i++){
-const byte=document.createElement('div');
-byte.className='data-byte';
-byte.textContent=Array.from({length:8},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
-byte.style.left=Math.random()*100+'vw';
-byte.style.animationDuration=(Math.random()*5+3)+'s';
-byte.style.animationDelay=Math.random()*5+'s';
-stream.appendChild(byte);
-}
-}
-createDataStream();
-
-document.getElementById('portNumber').textContent=$Port;
-
 function updateSystemInfo(){
 fetch('/info').then(r=>r.json()).then(d=>{
 document.getElementById('pcName').textContent=d.nombre;
 document.getElementById('pcUser').textContent=d.usuario;
-document.getElementById('pcTime').textContent=d.hora+':00';
+document.getElementById('pcTime').textContent=d.hora;
 });
 }
-
 function executeCommand(command){
-const consoleOutput=document.getElementById('consoleOutput');
-const outputText=document.getElementById('outputText');
-consoleOutput.classList.add('active');
-if(command=='apagar'||command=='reiniciar'){
-if(!confirm('[WARNING] Confirm '+command.toUpperCase()+' sequence?'))return;
-}
-outputText.innerHTML='<span style="color:#0f0">>> INITIATING COMMAND: '+command.toUpperCase()+'...</span><br>';
+const output=document.getElementById('outputText');
+output.innerHTML='>> INICIANDO: '+command+'...<br>';
 fetch('/cmd',{
 method:'POST',
 headers:{'Content-Type':'application/json'},
 body:JSON.stringify({accion:command})
-})
-.then(r=>r.json())
-.then(data=>{
-outputText.innerHTML+='<span style="color:#0ff">>> RESPONSE: '+data.mensaje+'</span><br>';
-outputText.innerHTML+='<span style="color:#0f0">>> STATUS: '+data.estado.toUpperCase()+'</span><br>';
-})
-.catch(error=>{
-outputText.innerHTML+='<span style="color:#f00">>> ERROR: Connection failed</span><br>';
+}).then(r=>r.json()).then(data=>{
+output.innerHTML+='>> RESPUESTA: '+data.mensaje+'<br>';
 });
-consoleOutput.scrollTop=consoleOutput.scrollHeight;
 }
-
 updateSystemInfo();
 setInterval(()=>{
 const now=new Date();
-const timeStr=now.getHours().toString().padStart(2,'0')+':'+
-now.getMinutes().toString().padStart(2,'0')+':'+
-now.getSeconds().toString().padStart(2,'0');
-document.getElementById('pcTime').textContent=timeStr;
+document.getElementById('pcTime').textContent=
+now.getHours()+':'+now.getMinutes()+':'+now.getSeconds();
 },1000);
 </script>
 </body>
@@ -251,155 +141,138 @@ try {
         
         if ($request.Url.LocalPath -eq '/' -or $request.Url.LocalPath -eq '') {
             $buffer = [System.Text.Encoding]::UTF8.GetBytes($simpleHTML)
-            $response.ContentType = 'text/html; charset=utf-8'
+            $response.ContentType = 'text/html'
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            Write-Log "Página servida a $($request.RemoteEndPoint)"
+            $response.Close()
         }
         elseif ($request.Url.LocalPath -eq '/info') {
             $info = @{
                 nombre = $env:COMPUTERNAME
                 usuario = $env:USERNAME
-                hora = (Get-Date).ToString('HH:mm')
+                hora = (Get-Date).ToString('HH:mm:ss')
             }
             $json = $info | ConvertTo-Json
             $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json; charset=utf-8'
+            $response.ContentType = 'application/json'
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            $response.Close()
         }
         elseif ($request.Url.LocalPath -eq '/cmd' -and $request.HttpMethod -eq 'POST') {
-            $reader = New-Object System.IO.StreamReader($request.InputStream, $request.ContentEncoding)
+            $reader = New-Object System.IO.StreamReader($request.InputStream)
             $body = $reader.ReadToEnd()
             $data = $body | ConvertFrom-Json
             
             $result = @{estado = 'ok'; mensaje = ''}
             
-            Write-Log "Comando recibido: $($data.accion) desde $($request.RemoteEndPoint)"
+            Write-Log "Comando: $($data.accion)"
             
             switch ($data.accion) {
-                'apagar' {
-                    shutdown /s /f /t 0
-                    $result.mensaje = 'SHUTDOWN SEQUENCE INITIATED'
-                }
-                'reiniciar' {
-                    shutdown /r /f /t 0
-                    $result.mensaje = 'REBOOT SEQUENCE INITIATED'
-                }
-                'bloquear' {
-                    rundll32.exe user32.dll,LockWorkStation
-                    $result.mensaje = 'SYSTEM LOCK ENGAGED'
-                }
-                'estado' {
-                    $result.mensaje = 'SYSTEM STATUS: NOMINAL'
-                }
-                'log' {
-                    if (Test-Path $logPath) {
-                        $log = Get-Content $logPath -Tail 5
-                        $result.mensaje = 'LAST LOG ENTRIES: ' + ($log -join ' | ')
-                    } else {
-                        $result.mensaje = 'NO LOG FILES DETECTED'
+                'apagar' { shutdown /s /f /t 0; $result.mensaje = 'APAGANDO...' }
+                'reiniciar' { shutdown /r /f /t 0; $result.mensaje = 'REINICIANDO...' }
+                'bloquear' { rundll32.exe user32.dll,LockWorkStation; $result.mensaje = 'BLOQUEADO' }
+                'estado' { $result.mensaje = 'SISTEMA OK' }
+                'log' { 
+                    if (Test-Path $logPath) { 
+                        $log = Get-Content $logPath -Tail 3
+                        $result.mensaje = ($log -join ' | ')
+                    } else { 
+                        $result.mensaje = 'NO LOGS' 
                     }
                 }
-                'cancelar' {
-                    shutdown /a
-                    $result.mensaje = 'SHUTDOWN SEQUENCE ABORTED'
-                }
-                default {
-                    $result.estado = 'error'
-                    $result.mensaje = 'INVALID COMMAND'
-                }
+                'cancelar' { shutdown /a; $result.mensaje = 'APAGADO CANCELADO' }
+                default { $result.estado = 'error'; $result.mensaje = 'COMANDO INVALIDO' }
             }
             
             $json = $result | ConvertTo-Json
             $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json; charset=utf-8'
+            $response.ContentType = 'application/json'
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            $response.Close()
         }
         else {
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes('404 - ACCESS DENIED')
+            $buffer = [System.Text.Encoding]::UTF8.GetBytes('404')
             $response.StatusCode = 404
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            $response.Close()
         }
-        
-        $response.Close()
     }
 } catch {
-    Write-Log "ERROR CRITICO: $_"
+    Write-Log "ERROR: $_"
     Remove-Item $runningFile -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 30
 }
-"@
+'@
 
-$monitorScript = @"
-param(`$Port)
+$monitorScript = @'
+param($Port)
 
-`$logPath = "$env:TEMP\webserver_monitor_log.txt"
-`$runningFile = "$env:TEMP\webserver_running.txt"
+$logPath = "$env:TEMP\webserver_monitor_log.txt"
+$runningFile = "$env:TEMP\webserver_running.txt"
 
 function Write-Log {
-    param(`$Message)
-    `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "`$timestamp - `$Message" | Out-File `$logPath -Append
+    param($Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File $logPath -Append
 }
 
 function Start-WebServer {
     Write-Log "Iniciando servidor web..."
     
-    Get-Process -Name "powershell" | Where-Object { `$_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     
     Start-Sleep -Seconds 2
     
-    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port `$Port" -WindowStyle Hidden
+    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Port" -WindowStyle Hidden
     
-    Write-Log "Comando de inicio ejecutado"
+    Write-Log "Comando ejecutado"
 }
 
 Write-Log "=== MONITOR INICIADO ==="
 
 Start-WebServer
 
-`$failCount = 0
+$failCount = 0
 
-while (`$true) {
+while ($true) {
     try {
-        if (-not (Test-Path `$runningFile)) {
-            Write-Log "ADVERTENCIA: Archivo running no encontrado"
-            `$failCount++
-        } else {
-            `$test = Invoke-WebRequest -Uri "http://localhost:`$Port/info" -TimeoutSec 3 -ErrorAction SilentlyContinue
+        if (Test-Path $runningFile) {
+            $test = Invoke-WebRequest -Uri "http://localhost:$Port/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
             
-            if (`$test.StatusCode -eq 200) {
-                `$failCount = 0
-                Write-Log "Servidor OK (verificación cada minuto)"
+            if ($test.StatusCode -eq 200) {
+                $failCount = 0
             } else {
-                `$failCount++
-                Write-Log "Respuesta inesperada: $(`$test.StatusCode) (Fallo `$failCount/3)"
+                $failCount++
+                Write-Log "Fallo $failCount/3 - Codigo: $($test.StatusCode)"
             }
+        } else {
+            $failCount++
+            Write-Log "Fallo $failCount/3 - Sin archivo running"
         }
     } catch {
-        `$failCount++
-        Write-Log "Error de conexión: `$_ (Fallo `$failCount/3)"
+        $failCount++
+        Write-Log "Fallo $failCount/3 - Error conexion"
     }
     
-    `$process = Get-Process -Name "powershell" | Where-Object { `$_.CommandLine -like "*WebServer.ps1*" } -ErrorAction SilentlyContinue
-    if (-not `$process) {
-        Write-Log "Proceso del servidor no encontrado"
-        `$failCount++
+    $process = Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } -ErrorAction SilentlyContinue
+    if (-not $process) {
+        $failCount++
+        Write-Log "Fallo $failCount/3 - Proceso no existe"
     }
     
-    if (`$failCount -ge 3) {
-        Write-Log "3 FALLOS CONSECUTIVOS - REINICIANDO SERVIDOR"
+    if ($failCount -ge 3) {
+        Write-Log "REINICIANDO SERVIDOR"
         Start-WebServer
-        `$failCount = 0
-        Remove-Item `$runningFile -ErrorAction SilentlyContinue
+        $failCount = 0
+        Remove-Item $runningFile -ErrorAction SilentlyContinue
     }
     
     Start-Sleep -Seconds 60
 }
-"@
+'@
 
 $webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8 -Force
 $monitorScript | Out-File "C:\Windows\System32\WebMonitor.ps1" -Encoding UTF8 -Force
@@ -415,13 +288,13 @@ netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow p
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "3. Reservando URL para todos los usuarios..." -ForegroundColor Yellow
+Write-Host "3. Reservando URL..." -ForegroundColor Yellow
 netsh http delete urlacl url=http://*:$Puerto/ 2>$null
 netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
 Write-Host "  OK - URL reservada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Creando tareas programadas..." -ForegroundColor Yellow
+Write-Host "4. Creando tareas..." -ForegroundColor Yellow
 
 schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
 schtasks /delete /tn "PCWeb_Monitor_$userName`_backup" /f 2>$null
@@ -432,12 +305,10 @@ schtasks /create /tn "PCWeb_Monitor_$userName" /tr "$taskCommand" /sc onlogon /r
 
 schtasks /create /tn "PCWeb_Monitor_$userName`_backup" /tr "$taskCommand" /sc minute /mo 1 /ru $currentUser /rl HIGHEST /f 2>$null
 
-Write-Host "  OK - Tareas programadas creadas:" -ForegroundColor Green
-Write-Host "    - PCWeb_Monitor_$userName (al iniciar sesión)"
-Write-Host "    - PCWeb_Monitor_${userName}_backup (cada 1 minuto)"
+Write-Host "  OK - Tareas creadas" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "5. Iniciando servidor web y monitor..." -ForegroundColor Yellow
+Write-Host "5. Iniciando servicios..." -ForegroundColor Yellow
 
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
@@ -449,28 +320,27 @@ Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle
 Start-Sleep -Seconds 5
 
 Write-Host ""
-Write-Host "6. Probando conexión..." -ForegroundColor Yellow
+Write-Host "6. Probando conexion..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
 for ($i = 1; $i -le 10; $i++) {
     try {
         $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
         if ($test.nombre) {
-            Write-Host "  OK - CONEXIÓN EXITOSA (Intento $i/10)" -ForegroundColor Green
+            Write-Host "  OK - CONEXION EXITOSA ($i/10)" -ForegroundColor Green
             Write-Host "    PC: $($test.nombre)" -ForegroundColor White
             Write-Host "    Usuario: $($test.usuario)" -ForegroundColor White
             $conexionExitosa = $true
             break
         }
     } catch {
-        Write-Host "  Intentando conectar... (Intento $i/10)" -ForegroundColor Yellow
+        Write-Host "  Intentando conectar... ($i/10)" -ForegroundColor Yellow
         Start-Sleep -Seconds 2
     }
 }
 
 if (-not $conexionExitosa) {
-    Write-Host "  ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
-    Write-Host "  El monitor intentará reiniciarlo automáticamente" -ForegroundColor White
+    Write-Host "  ADVERTENCIA: No se pudo conectar" -ForegroundColor Yellow
 }
 
 try {
@@ -484,35 +354,24 @@ try {
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   INSTALACIÓN COMPLETADA" -ForegroundColor Cyan
+Write-Host "   INSTALACION COMPLETADA" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "URL DE ACCESO LOCAL:" -ForegroundColor Yellow
+Write-Host "URL LOCAL:" -ForegroundColor Yellow
 Write-Host "  http://localhost:$Puerto"
 Write-Host ""
-Write-Host "DESDE OTRO PC EN LA RED:" -ForegroundColor Yellow
+Write-Host "URL RED:" -ForegroundColor Yellow
 Write-Host "  http://$($ip):$Puerto"
 Write-Host ""
-Write-Host "COMANDOS DISPONIBLES:" -ForegroundColor Yellow
-Write-Host "  SHUTDOWN    - Apagar el equipo"
-Write-Host "  REBOOT      - Reiniciar el equipo"
-Write-Host "  LOCK SYSTEM - Bloquear la sesión"
-Write-Host "  STATUS CHECK- Verificar estado"
-Write-Host "  SYSTEM LOGS - Ver logs del servidor"
-Write-Host "  ABORT       - Cancelar apagado pendiente"
+Write-Host "COMANDOS:" -ForegroundColor Yellow
+Write-Host "  SHUTDOWN, REBOOT, LOCK, STATUS, LOGS, ABORT"
 Write-Host ""
-Write-Host "SISTEMA DE MONITOREO:" -ForegroundColor Yellow
-Write-Host "  * Verifica cada 60 segundos que el servidor responda"
-Write-Host "  * Si falla 3 veces seguidas, lo reinicia automáticamente"
-Write-Host "  * Tarea principal al iniciar sesión"
-Write-Host "  * Tarea backup cada 1 minuto"
-Write-Host "  * Logs en %TEMP%\webserver_log.txt y %TEMP%\webserver_monitor_log.txt"
+Write-Host "MONITOREO:" -ForegroundColor Yellow
+Write-Host "  * Verifica cada 60 segundos"
+Write-Host "  * 3 fallos = reinicio"
+Write-Host "  * Logs en %TEMP%"
 Write-Host ""
-Write-Host "ARCHIVOS:" -ForegroundColor Yellow
-Write-Host "  Servidor: C:\Windows\System32\WebServer.ps1"
-Write-Host "  Monitor:  C:\Windows\System32\WebMonitor.ps1"
-Write-Host ""
-Write-Host "PARA DESINSTALAR:" -ForegroundColor Yellow
+Write-Host "DESINSTALAR:" -ForegroundColor Yellow
 Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar"
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
