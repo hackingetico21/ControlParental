@@ -12,6 +12,8 @@ if ($Desinstalar) {
     
     netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
     
+    schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
+    
     $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
     Remove-ItemProperty -Path $regPath -Name "PCWebControl" -ErrorAction SilentlyContinue 2>$null
     
@@ -23,8 +25,12 @@ if ($Desinstalar) {
     if (Test-Path "C:\Windows\System32\WebServer.ps1") {
         Remove-Item "C:\Windows\System32\WebServer.ps1" -Force -ErrorAction SilentlyContinue
     }
+    if (Test-Path "C:\Windows\System32\WebMonitor.ps1") {
+        Remove-Item "C:\Windows\System32\WebMonitor.ps1" -Force -ErrorAction SilentlyContinue
+    }
     
     Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
+    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
     
     Write-Host "SERVIDOR WEB DESINSTALADO" -ForegroundColor Green
     exit
@@ -48,10 +54,13 @@ Write-Host "PC: $computerName"
 Write-Host "Puerto: $Puerto"
 Write-Host ""
 
-Write-Host "1. Creando script del servidor web..." -ForegroundColor Yellow
+Write-Host "1. Creando scripts..." -ForegroundColor Yellow
 
 $webScript = @'
 param($Port = 8080)
+
+$logPath = "$env:TEMP\webserver_log.txt"
+"$(Get-Date) - Servidor web iniciado en puerto $Port" | Out-File $logPath -Append
 
 $simpleHTML = @"
 <!DOCTYPE html>
@@ -234,9 +243,7 @@ try {
     $listener.Prefixes.Add("http://+:$Port/")
     $listener.Start()
     
-    # Crear archivo de log para verificar que está funcionando
-    $logPath = "$env:TEMP\webserver_log.txt"
-    "$(Get-Date) - Servidor web iniciado en puerto $Port" | Out-File $logPath -Append
+    "$(Get-Date) - Servidor web escuchando en puerto $Port" | Out-File $logPath -Append
     
     while ($true) {
         $context = $listener.GetContext()
@@ -248,7 +255,6 @@ try {
             $response.ContentType = 'text/html; charset=utf-8'
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            "$(Get-Date) - Página principal servida a $($request.RemoteEndPoint)" | Out-File $logPath -Append
         }
         elseif ($request.Url.LocalPath -eq '/info') {
             $info = @{
@@ -321,17 +327,66 @@ try {
         $response.Close()
     }
 } catch {
-    $errorMsg = "$(Get-Date) - ERROR: $_" 
+    $errorMsg = "$(Get-Date) - ERROR CRITICO: $_" 
     $errorMsg | Out-File $logPath -Append
-    Write-Host "Error: $_"
+    Write-Host "Error critico en servidor web: $_"
+    
+    # Esperar 30 segundos y terminar para que el monitor pueda reiniciarlo
+    Start-Sleep -Seconds 30
+}
+'@
+
+$monitorScript = @'
+param($Port = 8080)
+
+$logPath = "$env:TEMP\webserver_monitor_log.txt"
+"$(Get-Date) - Monitor iniciado para puerto $Port" | Out-File $logPath -Append
+
+while ($true) {
+    try {
+        # Verificar si el servidor web está respondiendo
+        $test = Invoke-WebRequest -Uri "http://localhost:$Port/info" -TimeoutSec 5 -ErrorAction SilentlyContinue
+        
+        if ($test.StatusCode -eq 200) {
+            # El servidor está funcionando correctamente
+            $minuto = (Get-Date).Minute
+            if ($minuto -eq 0 -or $minuto -eq 30) {
+                "$(Get-Date) - Servidor web OK (verificacion cada 30 min)" | Out-File $logPath -Append
+            }
+        } else {
+            # Respuesta pero no es 200, algo raro
+            "$(Get-Date) - ADVERTENCIA: Servidor responde con código $($test.StatusCode)" | Out-File $logPath -Append
+        }
+    } catch {
+        # No hay respuesta, el servidor no está funcionando
+        "$(Get-Date) - ERROR: Servidor web no responde. Reiniciando..." | Out-File $logPath -Append
+        
+        # Matar procesos anteriores del servidor web
+        Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+        
+        # Pequeña pausa
+        Start-Sleep -Seconds 2
+        
+        # Iniciar el servidor web
+        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Port" -WindowStyle Hidden
+        
+        "$(Get-Date) - Comando de reinicio ejecutado" | Out-File $logPath -Append
+    }
+    
+    # Esperar 60 segundos antes de la siguiente verificación
+    Start-Sleep -Seconds 60
 }
 '@
 
 $webScript = $webScript -replace '\$Port', $Puerto
+$monitorScript = $monitorScript -replace '\$Port', $Puerto
 
 $webScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8 -Force
+$monitorScript | Out-File "C:\Windows\System32\WebMonitor.ps1" -Encoding UTF8 -Force
 
-Write-Host "  OK - Script creado en C:\Windows\System32\WebServer.ps1" -ForegroundColor Green
+Write-Host "  OK - Scripts creados:" -ForegroundColor Green
+Write-Host "    - C:\Windows\System32\WebServer.ps1" 
+Write-Host "    - C:\Windows\System32\WebMonitor.ps1"
 
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
@@ -340,37 +395,27 @@ netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow p
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "3. Configurando inicio automatico..." -ForegroundColor Yellow
+Write-Host "3. Creando tarea programada para el monitor..." -ForegroundColor Yellow
 
-$regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$regValue = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-try {
-    Set-ItemProperty -Path $regPath -Name "PCWebControl" -Value $regValue -Type String -Force -ErrorAction Stop
-    Write-Host "  OK - Entrada agregada al registro (HKCU\Run)" -ForegroundColor Green
-} catch {
-    Write-Host "  ERROR: No se pudo agregar entrada al registro: $_" -ForegroundColor Red
-}
+schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
 
-try {
-    $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PCWeb.lnk"
-    $WshShell = New-Object -ComObject WScript.Shell
-    $Shortcut = $WshShell.CreateShortcut($shortcutPath)
-    $Shortcut.TargetPath = "powershell.exe"
-    $Shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-    $Shortcut.WindowStyle = 7
-    $Shortcut.Save()
-    Write-Host "  OK - Acceso directo creado en carpeta Startup" -ForegroundColor Green
-} catch {
-    Write-Host "  ERROR: No se pudo crear acceso directo: $_" -ForegroundColor Red
-}
+$taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto"
+schtasks /create /tn "PCWeb_Monitor_$userName" /tr "$taskCommand" /sc onlogon /ru $currentUser /rl HIGHEST /f 2>$null
+
+schtasks /change /tn "PCWeb_Monitor_$userName" /ru $currentUser /rp "" 2>$null
+
+Write-Host "  OK - Tarea programada creada: PCWeb_Monitor_$userName" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Iniciando servidor web..." -ForegroundColor Yellow
+Write-Host "4. Iniciando servidor web y monitor..." -ForegroundColor Yellow
 
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
+Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 Start-Sleep -Seconds 1
 
 Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
+
+Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto" -WindowStyle Hidden
 
 Start-Sleep -Seconds 3
 
@@ -378,25 +423,25 @@ Write-Host ""
 Write-Host "5. Probando conexion..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
-for ($i = 1; $i -le 3; $i++) {
+for ($i = 1; $i -le 5; $i++) {
     try {
         $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
         if ($test.nombre) {
-            Write-Host "  OK - CONEXION EXITOSA (Intento $i/3)" -ForegroundColor Green
+            Write-Host "  OK - CONEXION EXITOSA (Intento $i/5)" -ForegroundColor Green
             Write-Host "    PC: $($test.nombre)" -ForegroundColor White
             Write-Host "    Usuario: $($test.usuario)" -ForegroundColor White
             $conexionExitosa = $true
             break
         }
     } catch {
-        Write-Host "  Intentando conectar... (Intento $i/3)" -ForegroundColor Yellow
+        Write-Host "  Intentando conectar... (Intento $i/5)" -ForegroundColor Yellow
         Start-Sleep -Seconds 2
     }
 }
 
 if (-not $conexionExitosa) {
     Write-Host "  ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
-    Write-Host "  El servidor puede tardar unos segundos en iniciar" -ForegroundColor White
+    Write-Host "  El monitor intentara reiniciarlo automaticamente" -ForegroundColor White
     Write-Host "  Puedes verificar manualmente en: http://localhost:$Puerto" -ForegroundColor White
 }
 
@@ -426,13 +471,17 @@ Write-Host "  [STATUS CHECK]- Verificar estado"
 Write-Host "  [SYSTEM LOGS] - Ver logs"
 Write-Host "  [ABORT]       - Cancelar apagado"
 Write-Host ""
-Write-Host "INICIO AUTOMATICO:" -ForegroundColor Yellow
-Write-Host "  * Registro de Windows (HKCU\Run)"
-Write-Host "  * Carpeta Startup"
+Write-Host "SISTEMA DE MONITOREO:" -ForegroundColor Yellow
+Write-Host "  * Verifica cada 60 segundos que el servidor web responda"
+Write-Host "  * Si no responde, lo reinicia automaticamente"
+Write-Host "  * Tarea programada en inicio de sesion"
+Write-Host "  * Logs en %TEMP%\webserver_log.txt y webserver_monitor_log.txt"
 Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
-Write-Host "  Script: C:\Windows\System32\WebServer.ps1"
-Write-Host "  Log:    %TEMP%\webserver_log.txt"
+Write-Host "  Servidor: C:\Windows\System32\WebServer.ps1"
+Write-Host "  Monitor:  C:\Windows\System32\WebMonitor.ps1"
+Write-Host "  Logs:     %TEMP%\webserver_log.txt"
+Write-Host "            %TEMP%\webserver_monitor_log.txt"
 Write-Host ""
 Write-Host "PARA DESINSTALAR:" -ForegroundColor Yellow
 Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar"
