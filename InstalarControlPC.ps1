@@ -42,10 +42,10 @@ Write-Host ""
 Write-Host "1. Creando scripts..." -ForegroundColor Yellow
 
 $webScript = @"
-param(`$Port = $Puerto)
+param(`$Port)
 
-`$logPath = "`$env:TEMP\webserver_log.txt"
-`$runningFile = "`$env:TEMP\webserver_running.txt"
+`$logPath = "$env:TEMP\webserver_log.txt"
+`$runningFile = "$env:TEMP\webserver_running.txt"
 
 function Write-Log {
     param(`$Message)
@@ -55,8 +55,8 @@ function Write-Log {
 
 Write-Log "=== SERVIDOR WEB INICIADO ==="
 Write-Log "Puerto: `$Port"
-Write-Log "Usuario: `$env:USERNAME"
-Write-Log "Computadora: `$env:COMPUTERNAME"
+Write-Log "Usuario: $env:USERNAME"
+Write-Log "Computadora: $env:COMPUTERNAME"
 
 `$simpleHTML = @"
 <!DOCTYPE html>
@@ -235,109 +235,109 @@ document.getElementById('pcTime').textContent=timeStr;
 "@
 
 try {
-    Remove-Item `$runningFile -ErrorAction SilentlyContinue
+    Remove-Item $runningFile -ErrorAction SilentlyContinue
     
-    `$listener = New-Object System.Net.HttpListener
-    `$listener.Prefixes.Add("http://*:$Port/")
-    `$listener.Start()
+    $listener = New-Object System.Net.HttpListener
+    $listener.Prefixes.Add("http://*:$Port/")
+    $listener.Start()
     
     Write-Log "Servidor escuchando en http://*:$Port/"
-    "RUNNING" | Out-File `$runningFile -Force
+    "RUNNING" | Out-File $runningFile -Force
     
-    while (`$true) {
-        `$context = `$listener.GetContext()
-        `$request = `$context.Request
-        `$response = `$context.Response
+    while ($true) {
+        $context = $listener.GetContext()
+        $request = $context.Request
+        $response = $context.Response
         
-        if (`$request.Url.LocalPath -eq '/' -or `$request.Url.LocalPath -eq '') {
-            `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$simpleHTML)
-            `$response.ContentType = 'text/html; charset=utf-8'
-            `$response.ContentLength64 = `$buffer.Length
-            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
-            Write-Log "Página servida a $(`$request.RemoteEndPoint)"
+        if ($request.Url.LocalPath -eq '/' -or $request.Url.LocalPath -eq '') {
+            $buffer = [System.Text.Encoding]::UTF8.GetBytes($simpleHTML)
+            $response.ContentType = 'text/html; charset=utf-8'
+            $response.ContentLength64 = $buffer.Length
+            $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            Write-Log "Página servida a $($request.RemoteEndPoint)"
         }
-        elseif (`$request.Url.LocalPath -eq '/info') {
-            `$info = @{
-                nombre = `$env:COMPUTERNAME
-                usuario = `$env:USERNAME
+        elseif ($request.Url.LocalPath -eq '/info') {
+            $info = @{
+                nombre = $env:COMPUTERNAME
+                usuario = $env:USERNAME
                 hora = (Get-Date).ToString('HH:mm')
             }
-            `$json = `$info | ConvertTo-Json
-            `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$json)
-            `$response.ContentType = 'application/json; charset=utf-8'
-            `$response.ContentLength64 = `$buffer.Length
-            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
+            $json = $info | ConvertTo-Json
+            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
+            $response.ContentType = 'application/json; charset=utf-8'
+            $response.ContentLength64 = $buffer.Length
+            $response.OutputStream.Write($buffer, 0, $buffer.Length)
         }
-        elseif (`$request.Url.LocalPath -eq '/cmd' -and `$request.HttpMethod -eq 'POST') {
-            `$reader = New-Object System.IO.StreamReader(`$request.InputStream, `$request.ContentEncoding)
-            `$body = `$reader.ReadToEnd()
-            `$data = `$body | ConvertFrom-Json
+        elseif ($request.Url.LocalPath -eq '/cmd' -and $request.HttpMethod -eq 'POST') {
+            $reader = New-Object System.IO.StreamReader($request.InputStream, $request.ContentEncoding)
+            $body = $reader.ReadToEnd()
+            $data = $body | ConvertFrom-Json
             
-            `$result = @{estado = 'ok'; mensaje = ''}
+            $result = @{estado = 'ok'; mensaje = ''}
             
             Write-Log "Comando recibido: $($data.accion) desde $($request.RemoteEndPoint)"
             
-            switch (`$data.accion) {
+            switch ($data.accion) {
                 'apagar' {
                     shutdown /s /f /t 0
-                    `$result.mensaje = 'SHUTDOWN SEQUENCE INITIATED'
+                    $result.mensaje = 'SHUTDOWN SEQUENCE INITIATED'
                 }
                 'reiniciar' {
                     shutdown /r /f /t 0
-                    `$result.mensaje = 'REBOOT SEQUENCE INITIATED'
+                    $result.mensaje = 'REBOOT SEQUENCE INITIATED'
                 }
                 'bloquear' {
                     rundll32.exe user32.dll,LockWorkStation
-                    `$result.mensaje = 'SYSTEM LOCK ENGAGED'
+                    $result.mensaje = 'SYSTEM LOCK ENGAGED'
                 }
                 'estado' {
-                    `$result.mensaje = 'SYSTEM STATUS: NOMINAL'
+                    $result.mensaje = 'SYSTEM STATUS: NOMINAL'
                 }
                 'log' {
-                    if (Test-Path `$logPath) {
-                        `$log = Get-Content `$logPath -Tail 5
-                        `$result.mensaje = 'LAST LOG ENTRIES: ' + (`$log -join ' | ')
+                    if (Test-Path $logPath) {
+                        $log = Get-Content $logPath -Tail 5
+                        $result.mensaje = 'LAST LOG ENTRIES: ' + ($log -join ' | ')
                     } else {
-                        `$result.mensaje = 'NO LOG FILES DETECTED'
+                        $result.mensaje = 'NO LOG FILES DETECTED'
                     }
                 }
                 'cancelar' {
                     shutdown /a
-                    `$result.mensaje = 'SHUTDOWN SEQUENCE ABORTED'
+                    $result.mensaje = 'SHUTDOWN SEQUENCE ABORTED'
                 }
                 default {
-                    `$result.estado = 'error'
-                    `$result.mensaje = 'INVALID COMMAND'
+                    $result.estado = 'error'
+                    $result.mensaje = 'INVALID COMMAND'
                 }
             }
             
-            `$json = `$result | ConvertTo-Json
-            `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$json)
-            `$response.ContentType = 'application/json; charset=utf-8'
-            `$response.ContentLength64 = `$buffer.Length
-            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
+            $json = $result | ConvertTo-Json
+            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
+            $response.ContentType = 'application/json; charset=utf-8'
+            $response.ContentLength64 = $buffer.Length
+            $response.OutputStream.Write($buffer, 0, $buffer.Length)
         }
         else {
-            `$buffer = [System.Text.Encoding]::UTF8.GetBytes('404 - ACCESS DENIED')
-            `$response.StatusCode = 404
-            `$response.ContentLength64 = `$buffer.Length
-            `$response.OutputStream.Write(`$buffer, 0, `$buffer.Length)
+            $buffer = [System.Text.Encoding]::UTF8.GetBytes('404 - ACCESS DENIED')
+            $response.StatusCode = 404
+            $response.ContentLength64 = $buffer.Length
+            $response.OutputStream.Write($buffer, 0, $buffer.Length)
         }
         
-        `$response.Close()
+        $response.Close()
     }
 } catch {
     Write-Log "ERROR CRITICO: $_"
-    Remove-Item `$runningFile -ErrorAction SilentlyContinue
+    Remove-Item $runningFile -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 30
 }
 "@
 
 $monitorScript = @"
-param(`$Port = $Puerto)
+param(`$Port)
 
-`$logPath = "`$env:TEMP\webserver_monitor_log.txt"
-`$runningFile = "`$env:TEMP\webserver_running.txt"
+`$logPath = "$env:TEMP\webserver_monitor_log.txt"
+`$runningFile = "$env:TEMP\webserver_running.txt"
 
 function Write-Log {
     param(`$Message)
@@ -418,7 +418,6 @@ Write-Host ""
 Write-Host "3. Reservando URL para todos los usuarios..." -ForegroundColor Yellow
 netsh http delete urlacl url=http://*:$Puerto/ 2>$null
 netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
-netsh http delete urlacl url=http://+:1-65535/ 2>$null
 Write-Host "  OK - URL reservada" -ForegroundColor Green
 
 Write-Host ""
@@ -450,14 +449,14 @@ Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle
 Start-Sleep -Seconds 5
 
 Write-Host ""
-Write-Host "6. Probando conexion..." -ForegroundColor Yellow
+Write-Host "6. Probando conexión..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
 for ($i = 1; $i -le 10; $i++) {
     try {
         $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
         if ($test.nombre) {
-            Write-Host "  OK - CONEXION EXITOSA (Intento $i/10)" -ForegroundColor Green
+            Write-Host "  OK - CONEXIÓN EXITOSA (Intento $i/10)" -ForegroundColor Green
             Write-Host "    PC: $($test.nombre)" -ForegroundColor White
             Write-Host "    Usuario: $($test.usuario)" -ForegroundColor White
             $conexionExitosa = $true
@@ -471,7 +470,7 @@ for ($i = 1; $i -le 10; $i++) {
 
 if (-not $conexionExitosa) {
     Write-Host "  ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
-    Write-Host "  El monitor intentara reiniciarlo automaticamente" -ForegroundColor White
+    Write-Host "  El monitor intentará reiniciarlo automáticamente" -ForegroundColor White
 }
 
 try {
@@ -485,7 +484,7 @@ try {
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   INSTALACION COMPLETADA" -ForegroundColor Cyan
+Write-Host "   INSTALACIÓN COMPLETADA" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "URL DE ACCESO LOCAL:" -ForegroundColor Yellow
