@@ -22,6 +22,10 @@ if ($Desinstalar) {
         Remove-Item $shortcutPath -Force -ErrorAction SilentlyContinue
     }
     
+    netsh http delete urlacl url=http://+:$Puerto/ 2>$null
+    netsh http delete urlacl url=http://*:$Puerto/ 2>$null
+    netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
+    
     if (Test-Path "C:\Windows\System32\WebServer.ps1") {
         Remove-Item "C:\Windows\System32\WebServer.ps1" -Force -ErrorAction SilentlyContinue
     }
@@ -39,9 +43,6 @@ if ($Desinstalar) {
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Host "Solicitando permisos de administrador..." -ForegroundColor Yellow
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Puerto $Puerto"
-    if ($Desinstalar) {
-        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Desinstalar"
-    }
     Start-Process powershell.exe -ArgumentList $arguments -Verb RunAs
     exit
 }
@@ -54,7 +55,20 @@ Write-Host "PC: $computerName"
 Write-Host "Puerto: $Puerto"
 Write-Host ""
 
-Write-Host "1. Creando scripts..." -ForegroundColor Yellow
+Write-Host "1. Configurando reserva de URL para el puerto $Puerto..." -ForegroundColor Yellow
+
+netsh http delete urlacl url=http://+:$Puerto/ 2>$null
+netsh http delete urlacl url=http://*:$Puerto/ 2>$null
+netsh http delete urlacl url=http://localhost:$Puerto/ 2>$null
+
+netsh http add urlacl url=http://+:$Puerto/ user=BUILTIN\Users 2>$null
+netsh http add urlacl url=http://*:$Puerto/ user=BUILTIN\Users 2>$null
+netsh http add urlacl url=http://localhost:$Puerto/ user=BUILTIN\Users 2>$null
+
+Write-Host "  OK - Reserva de URL configurada" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "2. Creando scripts..." -ForegroundColor Yellow
 
 $webScript = @'
 param($Port = 8080)
@@ -238,12 +252,38 @@ document.getElementById('pcTime').textContent=timeStr;
 </html>
 "@
 
+# IMPORTANTE: Usar * en lugar de + para evitar problemas de permisos
 try {
+    # Intentar primero con localhost (más seguro)
     $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add("http://+:$Port/")
+    
+    # Añadir múltiples prefijos para asegurar que funcione
+    $listener.Prefixes.Add("http://localhost:$Port/")
+    $listener.Prefixes.Add("http://127.0.0.1:$Port/")
+    $listener.Prefixes.Add("http://$env:COMPUTERNAME:$Port/")
+    
+    # Intentar con * y + pero pueden fallar sin permisos adecuados
+    try {
+        $listener.Prefixes.Add("http://*:$Port/")
+    } catch {
+        "$(Get-Date) - No se pudo añadir http://*:$Port/ - Continuando con localhost" | Out-File $logPath -Append
+    }
+    
+    try {
+        $listener.Prefixes.Add("http://+:$Port/")
+    } catch {
+        "$(Get-Date) - No se pudo añadir http://+:$Port/ - Continuando con localhost" | Out-File $logPath -Append
+    }
+    
     $listener.Start()
     
-    "$(Get-Date) - Servidor web escuchando en puerto $Port" | Out-File $logPath -Append
+    "$(Get-Date) - Servidor web escuchando en:" | Out-File $logPath -Append
+    foreach ($prefix in $listener.Prefixes) {
+        "$(Get-Date) -   $prefix" | Out-File $logPath -Append
+    }
+    
+    # Escribir también en un archivo de verificación para depuración
+    "$(Get-Date) - SERVIDOR INICIADO CORRECTAMENTE" | Out-File "$env:TEMP\webserver_running.txt" -Append
     
     while ($true) {
         $context = $listener.GetContext()
@@ -329,6 +369,7 @@ try {
 } catch {
     $errorMsg = "$(Get-Date) - ERROR CRITICO: $_" 
     $errorMsg | Out-File $logPath -Append
+    $errorMsg | Out-File "$env:TEMP\webserver_error.txt" -Append
     Write-Host "Error critico en servidor web: $_"
     
     # Esperar 30 segundos y terminar para que el monitor pueda reiniciarlo
@@ -342,39 +383,63 @@ param($Port = 8080)
 $logPath = "$env:TEMP\webserver_monitor_log.txt"
 "$(Get-Date) - Monitor iniciado para puerto $Port" | Out-File $logPath -Append
 
+function Start-WebServer {
+    "$(Get-Date) - Iniciando servidor web..." | Out-File $logPath -Append
+    
+    # Matar procesos anteriores del servidor web
+    Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    
+    Start-Sleep -Seconds 2
+    
+    # Iniciar el servidor web
+    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Port" -WindowStyle Hidden
+    
+    "$(Get-Date) - Comando de inicio ejecutado" | Out-File $logPath -Append
+}
+
+# Iniciar servidor al arrancar el monitor
+Start-WebServer
+
+$failCount = 0
+
 while ($true) {
     try {
         # Verificar si el servidor web está respondiendo
-        $test = Invoke-WebRequest -Uri "http://localhost:$Port/info" -TimeoutSec 5 -ErrorAction SilentlyContinue
+        $test = Invoke-WebRequest -Uri "http://localhost:$Port/info" -TimeoutSec 3 -ErrorAction SilentlyContinue
         
         if ($test.StatusCode -eq 200) {
             # El servidor está funcionando correctamente
+            $failCount = 0
             $minuto = (Get-Date).Minute
             if ($minuto -eq 0 -or $minuto -eq 30) {
                 "$(Get-Date) - Servidor web OK (verificacion cada 30 min)" | Out-File $logPath -Append
             }
         } else {
-            # Respuesta pero no es 200, algo raro
-            "$(Get-Date) - ADVERTENCIA: Servidor responde con código $($test.StatusCode)" | Out-File $logPath -Append
+            $failCount++
+            "$(Get-Date) - ADVERTENCIA: Servidor responde con código $($test.StatusCode) (Fallo $failCount/3)" | Out-File $logPath -Append
         }
     } catch {
-        # No hay respuesta, el servidor no está funcionando
-        "$(Get-Date) - ERROR: Servidor web no responde. Reiniciando..." | Out-File $logPath -Append
-        
-        # Matar procesos anteriores del servidor web
-        Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-        
-        # Pequeña pausa
-        Start-Sleep -Seconds 2
-        
-        # Iniciar el servidor web
-        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Port" -WindowStyle Hidden
-        
-        "$(Get-Date) - Comando de reinicio ejecutado" | Out-File $logPath -Append
+        $failCount++
+        "$(Get-Date) - ERROR: Servidor web no responde. (Fallo $failCount/3)" | Out-File $logPath -Append
     }
     
-    # Esperar 60 segundos antes de la siguiente verificación
-    Start-Sleep -Seconds 60
+    # Si hay 3 fallos consecutivos, reiniciar
+    if ($failCount -ge 3) {
+        "$(Get-Date) - 3 fallos consecutivos. Reiniciando servidor web..." | Out-File $logPath -Append
+        Start-WebServer
+        $failCount = 0
+    }
+    
+    # También verificar si el proceso existe, si no, reiniciar
+    $process = Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } -ErrorAction SilentlyContinue
+    if (-not $process) {
+        "$(Get-Date) - Proceso del servidor web no encontrado. Reiniciando..." | Out-File $logPath -Append
+        Start-WebServer
+        $failCount = 0
+    }
+    
+    # Esperar 30 segundos (más frecuente para detectar fallos rápido)
+    Start-Sleep -Seconds 30
 }
 '@
 
@@ -389,60 +454,71 @@ Write-Host "    - C:\Windows\System32\WebServer.ps1"
 Write-Host "    - C:\Windows\System32\WebMonitor.ps1"
 
 Write-Host ""
-Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
+Write-Host "3. Configurando firewall..." -ForegroundColor Yellow
 netsh advfirewall firewall delete rule name="PCWeb_$userName" 2>$null
 netsh advfirewall firewall add rule name="PCWeb_$userName" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "3. Creando tarea programada para el monitor..." -ForegroundColor Yellow
+Write-Host "4. Creando tarea programada para el monitor..." -ForegroundColor Yellow
 
 schtasks /delete /tn "PCWeb_Monitor_$userName" /f 2>$null
 
 $taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto"
+
 schtasks /create /tn "PCWeb_Monitor_$userName" /tr "$taskCommand" /sc onlogon /ru $currentUser /rl HIGHEST /f 2>$null
 
-schtasks /change /tn "PCWeb_Monitor_$userName" /ru $currentUser /rp "" 2>$null
+schtasks /create /tn "PCWeb_Monitor_$userName`_backup" /tr "$taskCommand" /sc minute /mo 5 /ru $currentUser /rl HIGHEST /f 2>$null
 
-Write-Host "  OK - Tarea programada creada: PCWeb_Monitor_$userName" -ForegroundColor Green
+Write-Host "  OK - Tareas programadas creadas: PCWeb_Monitor_$userName (y backup cada 5 min)" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Iniciando servidor web y monitor..." -ForegroundColor Yellow
+Write-Host "5. Iniciando servidor web y monitor..." -ForegroundColor Yellow
 
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebMonitor.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
-Start-Sleep -Seconds 1
-
-Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto" -WindowStyle Hidden
+Start-Sleep -Seconds 2
 
 Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebMonitor.ps1`" -Port $Puerto" -WindowStyle Hidden
 
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 5
 
 Write-Host ""
-Write-Host "5. Probando conexion..." -ForegroundColor Yellow
+Write-Host "6. Probando conexion..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
-for ($i = 1; $i -le 5; $i++) {
+for ($i = 1; $i -le 10; $i++) {
     try {
         $test = Invoke-RestMethod -Uri "http://localhost:$Puerto/info" -TimeoutSec 2 -ErrorAction SilentlyContinue
         if ($test.nombre) {
-            Write-Host "  OK - CONEXION EXITOSA (Intento $i/5)" -ForegroundColor Green
+            Write-Host "  OK - CONEXION EXITOSA (Intento $i/10)" -ForegroundColor Green
             Write-Host "    PC: $($test.nombre)" -ForegroundColor White
             Write-Host "    Usuario: $($test.usuario)" -ForegroundColor White
             $conexionExitosa = $true
             break
         }
     } catch {
-        Write-Host "  Intentando conectar... (Intento $i/5)" -ForegroundColor Yellow
+        Write-Host "  Intentando conectar... (Intento $i/10)" -ForegroundColor Yellow
         Start-Sleep -Seconds 2
     }
 }
 
 if (-not $conexionExitosa) {
     Write-Host "  ADVERTENCIA: No se pudo conectar al servidor" -ForegroundColor Yellow
-    Write-Host "  El monitor intentara reiniciarlo automaticamente" -ForegroundColor White
-    Write-Host "  Puedes verificar manualmente en: http://localhost:$Puerto" -ForegroundColor White
+    Write-Host "  Verificando logs para depuración:" -ForegroundColor White
+    
+    if (Test-Path "$env:TEMP\webserver_error.txt") {
+        Write-Host "  ERROR LOG:" -ForegroundColor Red
+        Get-Content "$env:TEMP\webserver_error.txt" -Tail 3
+    }
+    if (Test-Path "$env:TEMP\webserver_log.txt") {
+        Write-Host "  SERVER LOG:" -ForegroundColor Yellow
+        Get-Content "$env:TEMP\webserver_log.txt" -Tail 3
+    }
+    
+    Write-Host ""
+    Write-Host "  Puedes intentar iniciar manualmente:" -ForegroundColor White
+    Write-Host "  powershell -File C:\Windows\System32\WebServer.ps1 -Port $Puerto" -ForegroundColor Cyan
 }
 
 try {
@@ -472,9 +548,10 @@ Write-Host "  [SYSTEM LOGS] - Ver logs"
 Write-Host "  [ABORT]       - Cancelar apagado"
 Write-Host ""
 Write-Host "SISTEMA DE MONITOREO:" -ForegroundColor Yellow
-Write-Host "  * Verifica cada 60 segundos que el servidor web responda"
-Write-Host "  * Si no responde, lo reinicia automaticamente"
-Write-Host "  * Tarea programada en inicio de sesion"
+Write-Host "  * Verifica cada 30 segundos que el servidor web responda"
+Write-Host "  * Si no responde 3 veces seguidas, lo reinicia"
+Write-Host "  * Tarea principal al inicio de sesion"
+Write-Host "  * Tarea backup cada 5 minutos"
 Write-Host "  * Logs en %TEMP%\webserver_log.txt y webserver_monitor_log.txt"
 Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
