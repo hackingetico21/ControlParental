@@ -2,7 +2,7 @@ param(
     [switch]$Desinstalar, 
     [int]$Puerto = 8080
 )
-
+#ultimo
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $userName = $currentUser.Split('\')[1]
 $computerName = $env:COMPUTERNAME
