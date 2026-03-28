@@ -66,6 +66,15 @@ function Write-Log {
     "$timestamp - $Message" | Out-File $logPath -Append
 }
 
+# Obtener el usuario activo en la consola
+function Get-ActiveUser {
+    $activeSession = query session 2>$null | Where-Object { $_ -match ">" } | Select-Object -First 1
+    if ($activeSession -match ">(\S+)") {
+        return $matches[1]
+    }
+    return $env:USERNAME
+}
+
 function Initialize-FFmpeg {
     if (-not (Test-Path $tempDir)) {
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
@@ -168,67 +177,44 @@ function Send-PopupMessage {
         $displayMessage += "`n`nEnlace: $Link"
     }
     
-    $popupScript = @"
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+    # Crear script VBS para mostrar el mensaje (más confiable que PowerShell para ventanas emergentes)
+    $vbsScript = @"
+Dim WshShell, msg, title, link
+Set WshShell = CreateObject("WScript.Shell")
+title = "$Title"
+msg = "$displayMessage"
+link = "$Link"
 
-`$form = New-Object System.Windows.Forms.Form
-`$form.Text = "$Title"
-`$form.Size = New-Object System.Drawing.Size(500, 300)
-`$form.StartPosition = "CenterScreen"
-`$form.Topmost = `$true
-`$form.FormBorderStyle = "FixedDialog"
-`$form.MaximizeBox = `$false
-`$form.MinimizeBox = `$false
-
-`$label = New-Object System.Windows.Forms.Label
-`$label.Text = "$displayMessage"
-`$label.Location = New-Object System.Drawing.Point(20, 50)
-`$label.Size = New-Object System.Drawing.Size(440, 100)
-`$label.Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10)
-`$label.TextAlign = "MiddleCenter"
-
-`$buttonPanel = New-Object System.Windows.Forms.Panel
-`$buttonPanel.Location = New-Object System.Drawing.Point(0, 180)
-`$buttonPanel.Size = New-Object System.Drawing.Size(484, 80)
-
-`$buttonAceptar = New-Object System.Windows.Forms.Button
-`$buttonAceptar.Text = "Aceptar"
-`$buttonAceptar.Location = New-Object System.Drawing.Point(150, 25)
-`$buttonAceptar.Size = New-Object System.Drawing.Size(100, 30)
-`$buttonAceptar.Add_Click({ `$form.Close() })
-
-`$buttonPanel.Controls.Add(`$buttonAceptar)
-
-if ("$Link") {
-    `$buttonAbrir = New-Object System.Windows.Forms.Button
-    `$buttonAbrir.Text = "Abrir Enlace"
-    `$buttonAbrir.Location = New-Object System.Drawing.Point(280, 25)
-    `$buttonAbrir.Size = New-Object System.Drawing.Size(100, 30)
-    `$buttonAbrir.Add_Click({
-        Start-Process "$Link"
-        `$form.Close()
-    })
-    `$buttonPanel.Controls.Add(`$buttonAbrir)
-}
-
-`$form.Controls.Add(`$label)
-`$form.Controls.Add(`$buttonPanel)
-`$form.ShowDialog()
+If link <> "" Then
+    result = WshShell.Popup(msg & vbCrLf & vbCrLf & "Enlace: " & link, 0, title, 64 + 4)
+    If result = 6 Then
+        WshShell.Run link
+    End If
+Else
+    WshShell.Popup(msg, 0, title, 64)
+End If
 "@
     
-    $popupFile = "$env:TEMP\popup_$(Get-Random).ps1"
-    $popupScript | Out-File $popupFile -Encoding UTF8 -Force
+    $vbsFile = "$env:TEMP\popup_$(Get-Random).vbs"
+    $vbsScript | Out-File $vbsFile -Encoding ASCII -Force
     
-    # Ejecutar como el usuario actual usando schtasks
-    $taskName = "TempPopup_$(Get-Random)"
-    schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" /sc once /st 00:00 /ru $env:USERNAME /f 2>$null
-    schtasks /run /tn $taskName 2>$null
-    Start-Sleep -Seconds 2
-    schtasks /delete /tn $taskName /f 2>$null
+    # Ejecutar en la sesión activa usando el token del usuario
+    $activeUser = Get-ActiveUser
     
-    Start-Sleep -Seconds 10
-    Remove-Item $popupFile -ErrorAction SilentlyContinue
+    if ($activeUser -and $activeUser -ne "SYSTEM") {
+        # Usar schtasks para ejecutar en la sesión del usuario activo
+        $taskName = "TempPopup_$(Get-Random)"
+        schtasks /create /tn $taskName /tr "wscript.exe `"$vbsFile`"" /sc once /st 00:00 /ru $activeUser /f 2>$null
+        schtasks /run /tn $taskName 2>$null
+        Start-Sleep -Seconds 3
+        schtasks /delete /tn $taskName /f 2>$null
+    } else {
+        # Fallback: ejecutar directamente
+        wscript.exe $vbsFile
+    }
+    
+    Start-Sleep -Seconds 5
+    Remove-Item $vbsFile -ErrorAction SilentlyContinue
     
     Write-Log "Mensaje popup enviado"
 }
@@ -429,15 +415,21 @@ setInterval(actualizarInfo, 1000);
                         $mensaje = "REINICIANDO EQUIPO..."
                     }
                     'bloquear' { 
-                        # Ejecutar bloqueo en el contexto del usuario usando schtasks
-                        $lockScript = "$env:TEMP\lock_$(Get-Random).ps1"
+                        # Ejecutar bloqueo en la sesión activa del usuario
+                        $activeUser = Get-ActiveUser
+                        $lockScript = "$env:TEMP\lock_$(Get-Random).vbs"
                         '@' | Out-File $lockScript
-                        "rundll32.exe user32.dll,LockWorkStation" | Out-File $lockScript -Append
-                        $taskName = "TempLock_$(Get-Random)"
-                        schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$lockScript`"" /sc once /st 00:00 /ru $env:USERNAME /f 2>$null
-                        schtasks /run /tn $taskName 2>$null
-                        Start-Sleep -Seconds 2
-                        schtasks /delete /tn $taskName /f 2>$null
+                        "CreateObject(""WScript.Shell"").Run ""rundll32.exe user32.dll,LockWorkStation"", 0, False" | Out-File $lockScript -Append
+                        
+                        if ($activeUser -and $activeUser -ne "SYSTEM") {
+                            $taskName = "TempLock_$(Get-Random)"
+                            schtasks /create /tn $taskName /tr "wscript.exe `"$lockScript`"" /sc once /st 00:00 /ru $activeUser /f 2>$null
+                            schtasks /run /tn $taskName 2>$null
+                            Start-Sleep -Seconds 2
+                            schtasks /delete /tn $taskName /f 2>$null
+                        } else {
+                            wscript.exe $lockScript
+                        }
                         Remove-Item $lockScript -ErrorAction SilentlyContinue
                         $mensaje = "BLOQUEANDO SESION..."
                     }
@@ -449,7 +441,6 @@ setInterval(actualizarInfo, 1000);
                         $mensaje = "APAGADO CANCELADO"
                     }
                     'webcam' {
-                        # Capturar webcam directamente
                         $captura = Get-WebCamCapture
                         if ($captura -and $captura.Base64) {
                             $mensaje = "CAPTURA REALIZADA: $($captura.Timestamp)"
