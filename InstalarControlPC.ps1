@@ -10,11 +10,10 @@ $computerName = $env:COMPUTERNAME
 if ($Desinstalar) {
     Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
-    schtasks /delete /tn "PCWeb_USER" /f 2>$null
     schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
     schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
     
-    netsh advfirewall firewall delete rule name="PCWeb" 2>$null
+    netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
     
     netsh http delete urlacl url="http://*:$Puerto/" 2>$null
     netsh http delete urlacl url="http://localhost:$Puerto/" 2>$null
@@ -452,19 +451,9 @@ setInterval(updateInfo, 1000);
                 $response.OutputStream.Write($buffer, 0, $buffer.Length)
             }
             elseif ($request.Url.LocalPath -eq '/info') {
-                # Obtener información del usuario actual (no SYSTEM)
-                $username = $env:USERNAME
-                if ($username -eq "SYSTEM") {
-                    # Si estamos como SYSTEM, intentar obtener el usuario real
-                    $username = (Get-WmiObject -Class Win32_ComputerSystem).UserName
-                    if ($username) {
-                        $username = $username.Split('\')[1]
-                    }
-                }
-                
                 $info = @{
                     nombre = $env:COMPUTERNAME
-                    usuario = $username
+                    usuario = $env:USERNAME
                     hora = (Get-Date).ToString('HH:mm:ss')
                 }
                 $json = $info | ConvertTo-Json
@@ -483,28 +472,22 @@ setInterval(updateInfo, 1000);
                 
                 switch ($data.accion) {
                     'apagar' { 
-                        # Ejecutar en la sesión del usuario, no como SYSTEM
-                        Start-Process shutdown -ArgumentList "/s /f /t 0" -NoNewWindow -Wait
+                        shutdown /s /f /t 0
                         $mensaje = "APAGANDO EQUIPO..."
                     }
                     'reiniciar' { 
-                        Start-Process shutdown -ArgumentList "/r /f /t 0" -NoNewWindow -Wait
+                        shutdown /r /f /t 0
                         $mensaje = "REINICIANDO EQUIPO..."
                     }
                     'bloquear' { 
-                        # Bloquear requiere ejecutarse en la sesión del usuario
-                        $tempScript = "$env:TEMP\lock_$(Get-Random).ps1"
-                        "rundll32.exe user32.dll,LockWorkStation" | Out-File $tempScript
-                        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tempScript`"" -WindowStyle Hidden
-                        Start-Sleep -Seconds 2
-                        Remove-Item $tempScript -ErrorAction SilentlyContinue
+                        rundll32.exe user32.dll,LockWorkStation
                         $mensaje = "BLOQUEANDO SESION..."
                     }
                     'estado' { 
                         $mensaje = "SISTEMA OK - $(Get-Date)"
                     }
                     'cancelar' { 
-                        Start-Process shutdown -ArgumentList "/a" -NoNewWindow -Wait
+                        shutdown /a
                         $mensaje = "APAGADO CANCELADO"
                     }
                     'webcam' {
@@ -577,8 +560,8 @@ Write-Host "  OK - Script creado: C:\Windows\System32\WebServer.ps1" -Foreground
 # Configuración firewall
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
-netsh advfirewall firewall delete rule name="PCWeb" 2>$null
-netsh advfirewall firewall add rule name="PCWeb" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
+netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
+netsh advfirewall firewall add rule name="PCWeb_SYSTEM" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 # Reservar URLs
@@ -635,26 +618,36 @@ if (-not $conexionExitosa) {
     Write-Host "  Revisa el log: C:\Windows\System32\WebServer.log" -ForegroundColor White
 }
 
-# Crear tarea programada para inicio automático (como usuario normal, no SYSTEM)
+# Crear tarea programada para inicio automático (como SYSTEM, igual que el original)
 Write-Host ""
 Write-Host "7. Configurando inicio automatico..." -ForegroundColor Yellow
 
-schtasks /delete /tn "PCWeb_AutoStart" /f 2>$null
+schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
+schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
 
-# Crear tarea que se ejecuta al iniciar sesión (como el usuario actual, no SYSTEM)
 $taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-schtasks /create /tn "PCWeb_AutoStart" `
+
+# Tarea al iniciar Windows
+schtasks /create /tn "PCWeb_SYSTEM" `
     /tr "$taskCommand" `
-    /sc onlogon `
-    /ru "$currentUser" `
+    /sc onstart `
+    /ru SYSTEM `
+    /rl HIGHEST `
+    /delay 0000:30 `
+    /f 2>$null
+
+# Tarea de respaldo cada 5 minutos
+schtasks /create /tn "PCWeb_SYSTEM_Minuto" `
+    /tr "$taskCommand" `
+    /sc minute `
+    /mo 5 `
+    /ru SYSTEM `
     /rl HIGHEST `
     /f 2>$null
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  OK - Tarea creada para inicio automatico con el usuario: $userName" -ForegroundColor Green
-} else {
-    Write-Host "  ADVERTENCIA: No se pudo crear la tarea automatica" -ForegroundColor Yellow
-}
+Write-Host "  OK - Tareas creadas como SYSTEM:" -ForegroundColor Green
+Write-Host "    - PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
+Write-Host "    - PCWeb_SYSTEM_Minuto (cada 5 minutos, para garantizar que siempre este activo)" -ForegroundColor White
 
 # Obtener IP
 try {
@@ -681,8 +674,9 @@ Write-Host "  Usuario actual: $userName" -ForegroundColor White
 Write-Host "  PC: $computerName" -ForegroundColor White
 Write-Host ""
 Write-Host "INICIO AUTOMATICO:" -ForegroundColor Yellow
-Write-Host "  El servidor se iniciara automaticamente cuando $userName inicie sesion" -ForegroundColor Green
-Write-Host "  Tarea: PCWeb_AutoStart" -ForegroundColor White
+Write-Host "  El servidor se ejecuta como SYSTEM y se inicia automaticamente con Windows" -ForegroundColor Green
+Write-Host "  Tarea principal: PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
+Write-Host "  Tarea de respaldo: PCWeb_SYSTEM_Minuto (cada 5 minutos)" -ForegroundColor White
 Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
 Write-Host "  Script:   C:\Windows\System32\WebServer.ps1" -ForegroundColor White
