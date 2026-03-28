@@ -2,7 +2,7 @@ param(
     [switch]$Desinstalar, 
     [int]$Puerto = 8080
 )
-#ultimo
+
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $userName = $currentUser.Split('\')[1]
 $computerName = $env:COMPUTERNAME
@@ -215,11 +215,10 @@ if ("$Link" -ne "") {
     $popupFile = "$env:TEMP\popup_$(Get-Random).ps1"
     $popupScript | Out-File $popupFile -Encoding UTF8 -Force
     
-    # Usar Start-Process para lanzar el popup en un proceso separado
-    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" -WindowStyle Normal
+    # Ejecutar directamente en el contexto actual (el usuario)
+    powershell -ExecutionPolicy Bypass -WindowStyle Normal -File $popupFile
     
-    # Eliminar el archivo después de 10 segundos
-    Start-Sleep -Seconds 10
+    Start-Sleep -Seconds 5
     Remove-Item $popupFile -ErrorAction SilentlyContinue
     
     Write-Log "Mensaje popup enviado"
