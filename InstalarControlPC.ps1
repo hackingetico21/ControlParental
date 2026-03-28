@@ -215,10 +215,11 @@ if ("$Link" -ne "") {
     $popupFile = "$env:TEMP\popup_$(Get-Random).ps1"
     $popupScript | Out-File $popupFile -Encoding UTF8 -Force
     
-    # Ejecutar directamente en el contexto actual (el usuario)
-    powershell -ExecutionPolicy Bypass -WindowStyle Normal -File $popupFile
+    # Usar Start-Process para lanzar el popup en un proceso separado
+    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" -WindowStyle Normal
     
-    Start-Sleep -Seconds 5
+    # Eliminar el archivo después de 10 segundos
+    Start-Sleep -Seconds 10
     Remove-Item $popupFile -ErrorAction SilentlyContinue
     
     Write-Log "Mensaje popup enviado"
