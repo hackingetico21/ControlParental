@@ -10,10 +10,9 @@ $computerName = $env:COMPUTERNAME
 if ($Desinstalar) {
     Write-Host "DESINSTALANDO SERVIDOR WEB..." -ForegroundColor Yellow
     
-    schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
-    schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
+    schtasks /delete /tn "PCWeb_USER" /f 2>$null
     
-    netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
+    netsh advfirewall firewall delete rule name="PCWeb" 2>$null
     
     netsh http delete urlacl url="http://*:$Puerto/" 2>$null
     netsh http delete urlacl url="http://localhost:$Puerto/" 2>$null
@@ -158,74 +157,16 @@ function Get-WebCamCapture {
     }
 }
 
-function Execute-AsUser {
-    param(
-        [string]$Command,
-        [string]$Argument = ""
-    )
-    
-    # Obtener el usuario con sesión activa
-    $activeUser = $null
-    $sessions = query session 2>$null
-    foreach ($line in $sessions) {
-        if ($line -match ">(\S+)\s+console") {
-            $activeUser = $matches[1]
-            break
-        }
-        if ($line -match ">(\S+)\s+(\d+)") {
-            $activeUser = $matches[1]
-            break
-        }
-    }
-    
-    if (-not $activeUser) {
-        # Fallback: usar el usuario actual
-        $activeUser = $env:USERNAME
-    }
-    
-    Write-Log "Ejecutando como usuario: $activeUser - Comando: $Command $Argument"
-    
-    # Crear script temporal
-    $tempScript = "$env:TEMP\exec_$(Get-Random).ps1"
-    $scriptContent = "$Command $Argument"
-    $scriptContent | Out-File $tempScript -Encoding UTF8 -Force
-    
-    # Crear tarea programada para ejecutar como el usuario
-    $taskName = "TempExec_$(Get-Random)"
-    schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tempScript`"" /sc once /st 00:00 /ru $activeUser /f 2>$null
-    schtasks /run /tn $taskName 2>$null
-    Start-Sleep -Seconds 2
-    schtasks /delete /tn $taskName /f 2>$null
-    
-    Remove-Item $tempScript -ErrorAction SilentlyContinue
-}
-
 function Send-PopupMessage {
     param($Message, $Title = "Mensaje del Administrador", $Link = "")
     
     Write-Log "Enviando mensaje popup: $Title"
     
-    # Obtener el usuario con sesión activa
-    $activeUser = $null
-    $sessions = query session 2>$null
-    foreach ($line in $sessions) {
-        if ($line -match ">(\S+)\s+console") {
-            $activeUser = $matches[1]
-            break
-        }
-        if ($line -match ">(\S+)\s+(\d+)") {
-            $activeUser = $matches[1]
-            break
-        }
+    $displayMessage = $Message
+    if ($Link) {
+        $displayMessage += "`n`nEnlace: $Link"
     }
     
-    if (-not $activeUser) {
-        $activeUser = $env:USERNAME
-    }
-    
-    Write-Log "Enviando mensaje al usuario: $activeUser"
-    
-    # Crear script de PowerShell para mostrar el mensaje
     $popupScript = @"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -240,7 +181,7 @@ Add-Type -AssemblyName System.Drawing
 `$form.MinimizeBox = `$false
 
 `$label = New-Object System.Windows.Forms.Label
-`$label.Text = "$Message"
+`$label.Text = "$displayMessage"
 `$label.Location = New-Object System.Drawing.Point(20, 50)
 `$label.Size = New-Object System.Drawing.Size(440, 100)
 `$label.Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10)
@@ -274,16 +215,13 @@ if ("$Link" -ne "") {
     $popupFile = "$env:TEMP\popup_$(Get-Random).ps1"
     $popupScript | Out-File $popupFile -Encoding UTF8 -Force
     
-    # Ejecutar como el usuario activo usando schtasks
-    $taskName = "TempPopup_$(Get-Random)"
-    schtasks /create /tn $taskName /tr "powershell -ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" /sc once /st 00:00 /ru $activeUser /f 2>$null
-    schtasks /run /tn $taskName 2>$null
-    Start-Sleep -Seconds 5
-    schtasks /delete /tn $taskName /f 2>$null
+    # Ejecutar directamente en el contexto actual (el usuario)
+    powershell -ExecutionPolicy Bypass -WindowStyle Normal -File $popupFile
     
+    Start-Sleep -Seconds 5
     Remove-Item $popupFile -ErrorAction SilentlyContinue
     
-    Write-Log "Mensaje popup enviado a $activeUser"
+    Write-Log "Mensaje popup enviado"
 }
 
 function Start-WebServer {
@@ -294,7 +232,6 @@ function Start-WebServer {
     Write-Log "Usuario: $env:USERNAME"
     Write-Log "Computadora: $computerName"
     Write-Log "PID: $pid"
-    Write-Log "Nivel: SYSTEM"
     
     try {
         $listener = New-Object System.Net.HttpListener
@@ -482,8 +419,7 @@ setInterval(actualizarInfo, 1000);
                         $mensaje = "REINICIANDO EQUIPO..."
                     }
                     'bloquear' { 
-                        # Ejecutar bloqueo como el usuario activo
-                        Execute-AsUser -Command "rundll32.exe user32.dll,LockWorkStation"
+                        rundll32.exe user32.dll,LockWorkStation
                         $mensaje = "BLOQUEANDO SESION..."
                     }
                     'estado' { 
@@ -562,8 +498,8 @@ Write-Host "  OK - Script creado: C:\Windows\System32\WebServer.ps1" -Foreground
 
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
-netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
-netsh advfirewall firewall add rule name="PCWeb_SYSTEM" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
+netsh advfirewall firewall delete rule name="PCWeb" 2>$null
+netsh advfirewall firewall add rule name="PCWeb" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
 Write-Host ""
@@ -578,48 +514,21 @@ netsh http add urlacl url="http://${computerName}:$Puerto/" user=BUILTIN\Users 2
 Write-Host "  OK - URLs reservadas" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "4. Creando tareas programadas como SYSTEM (ADMIN)..." -ForegroundColor Yellow
-
-schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
-schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
-
-$taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-
-schtasks /create /tn "PCWeb_SYSTEM" `
-    /tr "$taskCommand" `
-    /sc onstart `
-    /ru SYSTEM `
-    /rl HIGHEST `
-    /f 2>$null
-
-schtasks /create /tn "PCWeb_SYSTEM_Minuto" `
-    /tr "$taskCommand" `
-    /sc minute `
-    /mo 1 `
-    /ru SYSTEM `
-    /rl HIGHEST `
-    /f 2>$null
-
-Write-Host "  OK - Tareas creadas como SYSTEM:" -ForegroundColor Green
-Write-Host "    - PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
-Write-Host "    - PCWeb_SYSTEM_Minuto (cada 1 minuto)" -ForegroundColor White
-
-Write-Host ""
-Write-Host "5. Matando procesos anteriores..." -ForegroundColor Yellow
+Write-Host "4. Matando procesos anteriores..." -ForegroundColor Yellow
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 Start-Sleep -Seconds 2
 
 Write-Host ""
-Write-Host "6. Iniciando servidor como ADMIN (SYSTEM)..." -ForegroundColor Yellow
+Write-Host "5. Iniciando servidor como usuario $userName..." -ForegroundColor Yellow
 
 $arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
-Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -Verb RunAs
+Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden
 
-Write-Host "  OK - Servidor iniciado como ADMIN" -ForegroundColor Green
+Write-Host "  OK - Servidor iniciado como usuario $userName" -ForegroundColor Green
 Start-Sleep -Seconds 5
 
 Write-Host ""
-Write-Host "7. Probando conexion..." -ForegroundColor Yellow
+Write-Host "6. Probando conexion..." -ForegroundColor Yellow
 
 $conexionExitosa = $false
 for ($i = 1; $i -le 10; $i++) {
@@ -643,6 +552,26 @@ if (-not $conexionExitosa) {
     Write-Host "  Revisa el log: C:\Windows\System32\WebServer.log" -ForegroundColor White
 }
 
+# Crear tarea programada para inicio automático como el usuario actual
+Write-Host ""
+Write-Host "7. Configurando inicio automatico para $userName..." -ForegroundColor Yellow
+
+schtasks /delete /tn "PCWeb_USER" /f 2>$null
+
+$taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
+schtasks /create /tn "PCWeb_USER" `
+    /tr "$taskCommand" `
+    /sc onlogon `
+    /ru $currentUser `
+    /rl HIGHEST `
+    /f 2>$null
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  OK - Tarea creada para inicio automatico con el usuario: $userName" -ForegroundColor Green
+} else {
+    Write-Host "  ADVERTENCIA: No se pudo crear la tarea automatica" -ForegroundColor Yellow
+}
+
 try {
     $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254.*"}).IPAddress | Select-Object -First 1
     if (-not $ip) {
@@ -662,20 +591,18 @@ Write-Host "  Local:    http://localhost:$Puerto" -ForegroundColor White
 Write-Host "  Red:      http://$($ip):$Puerto" -ForegroundColor White
 Write-Host "  Nombre:   http://${computerName}:$Puerto" -ForegroundColor White
 Write-Host ""
+Write-Host "INFORMACION DEL SISTEMA:" -ForegroundColor Yellow
+Write-Host "  Usuario: $userName" -ForegroundColor White
+Write-Host "  PC: $computerName" -ForegroundColor White
+Write-Host ""
+Write-Host "INICIO AUTOMATICO:" -ForegroundColor Yellow
+Write-Host "  El servidor se inicia automaticamente cuando $userName inicia sesion" -ForegroundColor Green
+Write-Host "  Tarea: PCWeb_USER" -ForegroundColor White
+Write-Host ""
 Write-Host "ARCHIVOS:" -ForegroundColor Yellow
 Write-Host "  Script:   C:\Windows\System32\WebServer.ps1" -ForegroundColor White
 Write-Host "  Capturas: C:\Windows\System32\WebCamCaptures\" -ForegroundColor White
 Write-Host "  Log:      C:\Windows\System32\WebServer.log" -ForegroundColor White
-Write-Host "  PID:      C:\Windows\System32\WebServer.pid" -ForegroundColor White
-Write-Host ""
-Write-Host "TAREAS PROGRAMADAS (ejecutadas como SYSTEM/ADMIN):" -ForegroundColor Yellow
-Write-Host "  - PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
-Write-Host "  - PCWeb_SYSTEM_Minuto (cada 1 minuto)" -ForegroundColor White
-Write-Host ""
-Write-Host "COMANDOS UTILES:" -ForegroundColor Yellow
-Write-Host "  Ver log:     Get-Content C:\Windows\System32\WebServer.log -Wait" -ForegroundColor White
-Write-Host "  Ver tareas:  schtasks /query /tn PCWeb_*" -ForegroundColor White
-Write-Host "  Ver proceso: Get-Process | Where-Object {$_.CommandLine -like '*WebServer*'}" -ForegroundColor White
 Write-Host ""
 Write-Host "DESINSTALAR:" -ForegroundColor Yellow
 Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar" -ForegroundColor White
